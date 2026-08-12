@@ -1,6 +1,8 @@
-target/
+build/
+.gradle/
+!gradle-wrapper.jar
 *.class
-*.jar
+
 .idea/
 *.iml
 .vscode/
@@ -12,4 +14,4 @@ target/
 /data/
 chronit.yml
 secrets.yml
-!config/chronit.example.yml
+/test

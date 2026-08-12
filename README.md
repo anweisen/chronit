@@ -195,7 +195,7 @@ Build with the optional ViaVersion module:
 ```bash
 docker compose -f docker/docker-compose.yml build --build-arg VIA=true
 # or, locally:
-mvn -Pvia package
+./gradlew -Pvia build
 ```
 
 That enables `protocol: 1.20.4` and numeric protocol ids other than 776, and gives `auto` something
@@ -207,11 +207,12 @@ through `ServiceLoader`. Deleting `chronit-via/` leaves a working 26.2-only appl
 
 ### Targeting a different Minecraft version natively
 
-Change two properties in the root `pom.xml` and rebuild:
+Change two entries in `gradle/libs.versions.toml` and rebuild:
 
-```xml
-<mcpl.version>26.2-SNAPSHOT</mcpl.version>
-<minecraft.version>26.2</minecraft.version>
+```toml
+[versions]
+minecraft = "26.2"
+mcpl = "26.2-20260809.160751-16"
 ```
 
 Nothing outside `chronit-driver-mcpl` needs to change. Everything version-specific lives behind the
@@ -276,13 +277,20 @@ when one is set.
 ## Development
 
 ```bash
-mvn verify                                          # unit + protocol integration tests
-mvn -Pvia package                                   # include the translation layer
-java -jar chronit-app/target/chronit.jar validate -c chronit.yml
+./gradlew build                                     # compile, unit + protocol integration tests, jar
+./gradlew -Pvia build                               # include the translation layer
+./gradlew :chronit-app:run --args="validate -c chronit.yml"
+
+java -jar chronit-app/build/libs/chronit.jar validate -c chronit.yml
 ```
 
-Building needs nothing installed locally beyond Docker — the image builds Maven and the JDK in a
-multi-stage build.
+Gradle with the Kotlin DSL. The wrapper pins the exact Gradle version and verifies its checksum, so
+nothing needs installing beyond a JDK — and nothing at all if you build the image, which fetches
+both in a multi-stage build.
+
+Versions live in one place, `gradle/libs.versions.toml`. Shared build configuration is a convention
+plugin in `buildSrc/` rather than a `subprojects { }` block, so each module's build file describes
+that module honestly and the configuration cache stays usable.
 
 ### Testing
 
@@ -315,7 +323,15 @@ chronit-driver-mcpl/   the Minecraft 26.2 implementation — the only version-aw
 chronit-via/           optional ViaVersion translation, found via ServiceLoader
 chronit-web/           optional status and login interface
 chronit-app/           command line and executable jar
+
+buildSrc/              shared build conventions
+gradle/libs.versions.toml   every dependency version
+docker/                Dockerfile and compose, including the Paper test server
+config/                the commented example configuration
 ```
+
+Dependencies use `api` only where a type genuinely appears in a module's public signatures, so a
+consumer's compile classpath carries what it is meant to use and no more.
 
 ---
 

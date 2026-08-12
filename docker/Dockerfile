@@ -1,23 +1,33 @@
-# Build stage — no local Maven or JDK required on the host.
+# Build stage — no local JDK or Gradle required on the host. The wrapper fetches the exact Gradle
+# version the repository pins, verifying its checksum.
 #
 # Pass --build-arg VIA=true to bundle the optional ViaVersion translation layer, which lets the
-# 26.2 client join servers running older protocols.
-FROM maven:3.9-eclipse-temurin-21 AS build
+# client join servers running older protocols.
+FROM eclipse-temurin:21-jdk AS build
 
 ARG VIA=false
 
 WORKDIR /build
 
-# Resolve dependencies against the POMs alone first, so editing sources does not re-download
-# the world on every rebuild.
-COPY pom.xml .
-COPY chronit-core/pom.xml chronit-core/
-COPY chronit-driver-mcpl/pom.xml chronit-driver-mcpl/
-COPY chronit-web/pom.xml chronit-web/
-COPY chronit-via/pom.xml chronit-via/
-COPY chronit-app/pom.xml chronit-app/
-RUN --mount=type=cache,target=/root/.m2/repository \
-    mvn -B -q dependency:go-offline -DskipTests || true
+# Build definitions first, so editing sources does not invalidate the dependency cache layer.
+COPY gradlew ./
+COPY gradle gradle
+COPY settings.gradle.kts build.gradle.kts gradle.properties ./
+COPY buildSrc buildSrc
+COPY chronit-core/build.gradle.kts chronit-core/
+COPY chronit-driver-mcpl/build.gradle.kts chronit-driver-mcpl/
+COPY chronit-web/build.gradle.kts chronit-web/
+COPY chronit-via/build.gradle.kts chronit-via/
+COPY chronit-app/build.gradle.kts chronit-app/
+
+# Git does not always preserve the executable bit on a Windows checkout, and the build context
+# carries the mode straight through.
+RUN chmod +x gradlew
+
+# Warms the dependency and Gradle-distribution caches. Allowed to fail: it is an optimisation, and
+# the real build below reports any genuine resolution problem.
+RUN --mount=type=cache,target=/root/.gradle \
+    ./gradlew --no-daemon -Pvia dependencies --configuration runtimeClasspath > /dev/null 2>&1 || true
 
 COPY chronit-core/src chronit-core/src
 COPY chronit-driver-mcpl/src chronit-driver-mcpl/src
@@ -25,10 +35,12 @@ COPY chronit-web/src chronit-web/src
 COPY chronit-via/src chronit-via/src
 COPY chronit-app/src chronit-app/src
 
-RUN --mount=type=cache,target=/root/.m2/repository \
-    if [ "$VIA" = "true" ]; then PROFILES="-Pvia"; else PROFILES=""; fi && \
-    mvn -B -DskipTests $PROFILES package && \
-    cp chronit-app/target/chronit.jar /build/chronit.jar
+# Tests need a loopback network for the in-process protocol server; they run in CI rather than
+# here, so the image build stays quick and hermetic.
+RUN --mount=type=cache,target=/root/.gradle \
+    if [ "$VIA" = "true" ]; then VIA_FLAG="-Pvia"; else VIA_FLAG=""; fi && \
+    ./gradlew --no-daemon $VIA_FLAG :chronit-app:shadowJar -x test && \
+    cp chronit-app/build/libs/chronit.jar /build/chronit.jar
 
 
 # Runtime stage

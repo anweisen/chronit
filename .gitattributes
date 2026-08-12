@@ -1,2 +1,13 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts must keep LF even when checked out on Windows, or they fail to execute inside the
+# Linux container with "bad interpreter".
+gradlew        text eol=lf
+*.sh           text eol=lf
+Dockerfile     text eol=lf
+
+gradlew.bat    text eol=crlf
+
+# The wrapper jar is binary; normalising it would corrupt it.
+*.jar          binary
