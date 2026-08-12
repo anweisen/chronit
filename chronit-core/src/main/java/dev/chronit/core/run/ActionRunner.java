@@ -2,8 +2,8 @@ package dev.chronit.core.run;
 
 import dev.chronit.core.config.ActionConfig;
 import dev.chronit.core.config.WaitForConfig;
-import dev.chronit.core.driver.ChatLine;
 import dev.chronit.core.driver.ClientHandle;
+import dev.chronit.core.driver.ContainerInfo;
 import dev.chronit.core.util.Durations;
 import dev.chronit.core.util.Jitter;
 import dev.chronit.core.util.Redactor;
@@ -20,18 +20,20 @@ import java.util.regex.Pattern;
  *
  * <p>Two kinds of pacing are supported. A fixed {@code delayAfter} is simple but always either too
  * short or wastefully long, because how quickly a server answers varies with its load. A
- * {@code waitFor} pattern instead continues the moment the expected reply arrives, which is both
- * faster in the common case and more reliable in the slow one.
+ * {@code waitFor} pattern instead continues the moment the expected reply — a chat message, or a
+ * menu opening — arrives, which is both faster in the common case and more reliable in the slow one.
  */
 public final class ActionRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ActionRunner.class);
 
     private final ChatBus chat;
+    private final ScreenBus screens;
     private final Jitter jitter;
 
-    public ActionRunner(ChatBus chat, Jitter jitter) {
+    public ActionRunner(ChatBus chat, ScreenBus screens, Jitter jitter) {
         this.chat = chat;
+        this.screens = screens;
         this.jitter = jitter;
     }
 
@@ -67,31 +69,16 @@ public final class ActionRunner {
                 return new Result(Outcome.FAILED, executed, "session ended before " + label);
             }
 
-            // The waiter has to exist before the command goes out, or a fast reply is missed.
-            ChatBus.Waiter waiter = action.waitFor() != null
-                    ? chat.expect(Pattern.compile(action.waitFor().chat()))
-                    : null;
+            // The waiter has to exist before the action goes out. A menu can open within a
+            // millisecond of the command that asked for it.
+            SignalWaiter<?> waiter = action.waitFor() != null ? register(action.waitFor()) : null;
 
             try {
-                switch (action.kind()) {
-                    case COMMAND -> {
-                        log.info("Sending /{}", Redactor.redact(action.command()));
-                        client.sendCommand(action.command());
-                    }
-                    case CHAT -> {
-                        log.info("Saying: {}", Redactor.redact(action.chat()));
-                        client.sendChat(action.chat());
-                    }
-                    case WAIT -> log.debug("Pausing for {}", Durations.format(action.pause()));
-                }
+                perform(client, action);
                 executed++;
 
-                if (action.kind() == ActionConfig.Kind.WAIT) {
-                    sleep(action.pause());
-                }
-
                 if (waiter != null) {
-                    Result failure = awaitReply(action.waitFor(), waiter, label, executed);
+                    Result failure = awaitSignal(action.waitFor(), waiter, label, executed);
                     if (failure != null) {
                         return failure;
                     }
@@ -99,7 +86,9 @@ public final class ActionRunner {
 
                 sleep(action.delayAfter());
             } catch (IllegalStateException e) {
-                // Raised when the session left the world underneath us.
+                // Raised when the session left the world underneath us, or an action needed a
+                // container that is not open.
+                log.warn("{} failed: {}", label, e.getMessage());
                 return new Result(Outcome.FAILED, executed, label + " failed: " + e.getMessage());
             } finally {
                 if (waiter != null) {
@@ -111,16 +100,55 @@ public final class ActionRunner {
         return new Result(Outcome.COMPLETED, executed, "all actions completed");
     }
 
+    private void perform(ClientHandle client, ActionConfig action) throws InterruptedException {
+        switch (action.kind()) {
+            case COMMAND -> {
+                log.info("Sending /{}", Redactor.redact(action.command()));
+                client.sendCommand(action.command());
+            }
+            case CHAT -> {
+                log.info("Saying: {}", Redactor.redact(action.chat()));
+                client.sendChat(action.chat());
+            }
+            case WAIT -> {
+                log.debug("Pausing for {}", Durations.format(action.pause()));
+                sleep(action.pause());
+            }
+            case CLICK -> {
+                ContainerInfo container = client.openContainer().orElse(null);
+                log.info("Clicking {}{}",
+                        action.click().toSlotClick().describe(),
+                        container != null ? " in " + container.describe() : "");
+                client.clickSlot(action.click().toSlotClick());
+            }
+            case CLOSE_SCREEN -> {
+                if (Boolean.TRUE.equals(action.closeScreen())) {
+                    log.info("Closing the open menu");
+                    client.closeScreen();
+                }
+            }
+        }
+    }
+
+    private SignalWaiter<?> register(WaitForConfig waitFor) {
+        Pattern pattern = Pattern.compile(waitFor.pattern());
+        return switch (waitFor.subject()) {
+            case CHAT -> chat.expect(pattern);
+            case SCREEN -> screens.expect(pattern);
+        };
+    }
+
     /** @return null to continue, or the terminal result */
-    private Result awaitReply(WaitForConfig waitFor, ChatBus.Waiter waiter, String label, int executed)
+    private Result awaitSignal(WaitForConfig waitFor, SignalWaiter<?> waiter, String label, int executed)
             throws InterruptedException {
         Duration timeout = waitFor.timeoutOrDefault();
         try {
-            ChatLine line = waiter.await(timeout);
-            log.debug("Matched expected reply: {}", Redactor.redact(line.plainText()));
+            Object matched = waiter.await(timeout);
+            log.debug("Matched {}: {}", waitFor.describe(), describeMatch(matched));
             return null;
         } catch (TimeoutException e) {
-            String message = "no reply matching /" + waitFor.chat() + "/ within " + Durations.format(timeout);
+            String message = "waited " + Durations.format(timeout) + " for " + waitFor.describe()
+                    + " and it did not happen";
             return switch (waitFor.onTimeoutOrDefault()) {
                 case CONTINUE -> {
                     log.warn("{}: {} — continuing", label, message);
@@ -136,6 +164,16 @@ public final class ActionRunner {
                 }
             };
         }
+    }
+
+    private static String describeMatch(Object matched) {
+        if (matched instanceof ContainerInfo container) {
+            return container.describe();
+        }
+        if (matched instanceof dev.chronit.core.driver.ChatLine line) {
+            return Redactor.redact(line.plainText());
+        }
+        return String.valueOf(matched);
     }
 
     private void sleep(Duration base) throws InterruptedException {

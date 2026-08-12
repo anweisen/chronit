@@ -168,6 +168,22 @@ jobs:
           - wait: 3s
           - chat: "gg"
 
+          # Plugin menus: a command opens an inventory, and the reward is a slot you click.
+          # waitFor.screen holds until the menu is both open and populated — a window is opened
+          # first and filled a moment later, and a click in that gap does nothing.
+          - command: "rewards"
+            waitFor:
+              screen: "(?i)daily rewards"   # matched against the menu title; "" accepts any menu
+              timeout: 10s
+              onTimeout: FAIL               # no menu means the click below is pointless
+          - click:
+              slot: 13                      # numbered from 0 within the menu itself
+            delayAfter: 500ms
+          # inventory: PLAYER addresses your own inventory instead — 0-26 are the main rows,
+          # 27-35 the hotbar. button and mode default to LEFT and PICKUP.
+          # - click: { slot: 27, inventory: PLAYER, button: RIGHT, mode: SHIFT }
+          - closeScreen: true
+
 
 # ---------------------------------------------------------------------------------------------
 # Optional status and login interface. Disabled by default.

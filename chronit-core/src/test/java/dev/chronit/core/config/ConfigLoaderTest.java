@@ -1,6 +1,7 @@
 package dev.chronit.core.config;
 
 import dev.chronit.core.driver.ClientInformation;
+import dev.chronit.core.driver.SlotClick;
 import dev.chronit.core.driver.SessionSettings;
 import dev.chronit.core.util.Redactor;
 import org.junit.jupiter.api.AfterEach;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -225,6 +227,98 @@ class ConfigLoaderTest {
                                   - delayAfter: 5s
                         """));
         assertTrue(error.getMessage().contains("needs one of"), error.getMessage());
+    }
+
+    @Test
+    void parsesAMenuInteraction() {
+        ChronitConfig config = new ConfigLoader(Map.of()).loadString("""
+                accounts: [{id: t, auth: OFFLINE, username: T}]
+                servers: [{id: s, host: h}]
+                jobs:
+                  - id: j
+                    cron: "0 20 * * *"
+                    visits:
+                      - server: s
+                        account: t
+                        onReady:
+                          - command: "rewards"
+                            waitFor: { screen: "(?i)daily", timeout: 5s }
+                          - click: { slot: 13 }
+                          - click: { slot: 3, inventory: PLAYER, button: RIGHT, mode: SHIFT }
+                          - closeScreen: true
+                """);
+
+        List<ActionConfig> actions = config.job("j").orElseThrow().visits().getFirst().onReady();
+        assertEquals(ActionConfig.Kind.COMMAND, actions.get(0).kind());
+        assertEquals(WaitForConfig.Subject.SCREEN, actions.get(0).waitFor().subject());
+        assertEquals("(?i)daily", actions.get(0).waitFor().pattern());
+
+        assertEquals(ActionConfig.Kind.CLICK, actions.get(1).kind());
+        SlotClick simple = actions.get(1).click().toSlotClick();
+        assertEquals(SlotClick.InventoryPart.CONTAINER, simple.part(), "the opened menu is the default");
+        assertEquals(13, simple.slot());
+        assertEquals(SlotClick.ClickButton.LEFT, simple.button());
+        assertEquals(SlotClick.ClickMode.PICKUP, simple.mode());
+
+        SlotClick detailed = actions.get(2).click().toSlotClick();
+        assertEquals(SlotClick.InventoryPart.PLAYER, detailed.part());
+        assertEquals(SlotClick.ClickButton.RIGHT, detailed.button());
+        assertEquals(SlotClick.ClickMode.SHIFT, detailed.mode());
+
+        assertEquals(ActionConfig.Kind.CLOSE_SCREEN, actions.get(3).kind());
+    }
+
+    @Test
+    void rejectsAWaitForWithBothOrNeitherSubject() {
+        ConfigException both = assertThrows(ConfigException.class,
+                () -> new ConfigLoader(Map.of()).loadString("""
+                        accounts: [{id: t, auth: OFFLINE, username: T}]
+                        servers: [{id: s, host: h}]
+                        jobs:
+                          - id: j
+                            cron: "0 20 * * *"
+                            visits:
+                              - server: s
+                                account: t
+                                onReady:
+                                  - command: "x"
+                                    waitFor: { chat: "a", screen: "b" }
+                        """));
+        assertTrue(both.getMessage().contains("only one of 'chat' or 'screen'"), both.getMessage());
+
+        ConfigException neither = assertThrows(ConfigException.class,
+                () -> new ConfigLoader(Map.of()).loadString("""
+                        accounts: [{id: t, auth: OFFLINE, username: T}]
+                        servers: [{id: s, host: h}]
+                        jobs:
+                          - id: j
+                            cron: "0 20 * * *"
+                            visits:
+                              - server: s
+                                account: t
+                                onReady:
+                                  - command: "x"
+                                    waitFor: { timeout: 5s }
+                        """));
+        assertTrue(neither.getMessage().contains("needs 'chat' or 'screen'"), neither.getMessage());
+    }
+
+    @Test
+    void rejectsAnImpossiblePlayerInventorySlot() {
+        ConfigException error = assertThrows(ConfigException.class,
+                () -> new ConfigLoader(Map.of()).loadString("""
+                        accounts: [{id: t, auth: OFFLINE, username: T}]
+                        servers: [{id: s, host: h}]
+                        jobs:
+                          - id: j
+                            cron: "0 20 * * *"
+                            visits:
+                              - server: s
+                                account: t
+                                onReady:
+                                  - click: { slot: 40, inventory: PLAYER }
+                        """));
+        assertTrue(error.getMessage().contains("outside the player inventory"), error.getMessage());
     }
 
     @Test

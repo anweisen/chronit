@@ -12,6 +12,7 @@ import dev.chronit.core.driver.ChatLine;
 import dev.chronit.core.driver.ClientEvents;
 import dev.chronit.core.driver.ClientHandle;
 import dev.chronit.core.driver.ConnectRequest;
+import dev.chronit.core.driver.ContainerInfo;
 import dev.chronit.core.driver.DisconnectInfo;
 import dev.chronit.core.driver.DriverException;
 import dev.chronit.core.driver.MinecraftClientDriver;
@@ -168,6 +169,7 @@ public final class VisitRunner {
                                   SessionSettings settings,
                                   ProtocolResolver.Plan plan) throws InterruptedException {
         ChatBus chat = new ChatBus();
+        ScreenBus screens = new ScreenBus();
         AtomicReference<DisconnectInfo> disconnect = new AtomicReference<>();
 
         log.info("Visiting {} ({}) as account '{}' using {}",
@@ -177,7 +179,7 @@ public final class VisitRunner {
         try {
             client = driver.connect(
                     new ConnectRequest(target, auth, settings, plan.protocolVersion(), plan.translated()),
-                    new Events(chat, server.id(), disconnect));
+                    new Events(chat, screens, server.id(), disconnect));
         } catch (DriverException e) {
             return Attempt.fatal(e.getMessage());
         }
@@ -186,7 +188,7 @@ public final class VisitRunner {
             ReadyInfo ready = awaitReady(client, settings.readyWhen().timeout());
             Instant readyAt = Instant.now();
 
-            ActionRunner runner = new ActionRunner(chat, settings.jitter());
+            ActionRunner runner = new ActionRunner(chat, screens, settings.jitter());
             ActionRunner.Result actions = runner.run(client, visit.onReadyOrEmpty());
 
             if (!actions.isSuccess()) {
@@ -218,6 +220,7 @@ public final class VisitRunner {
                     kindOf(disconnect.get(), DisconnectInfo.Kind.UNKNOWN));
         } finally {
             chat.abort("session ended");
+            screens.abort("session ended");
             client.close();
         }
     }
@@ -267,6 +270,7 @@ public final class VisitRunner {
 
     /** Bridges driver callbacks into the chat bus and the log. */
     private record Events(ChatBus chat,
+                          ScreenBus screens,
                           String serverId,
                           AtomicReference<DisconnectInfo> disconnect) implements ClientEvents {
 
@@ -276,6 +280,17 @@ public final class VisitRunner {
                 log.debug("[{}] {}", serverId, Redactor.redact(line.plainText()));
             }
             chat.publish(line);
+        }
+
+        @Override
+        public void onScreen(ContainerInfo info) {
+            log.debug("[{}] menu {}", serverId, info.describe());
+            screens.publish(info);
+        }
+
+        @Override
+        public void onScreenClose(int containerId) {
+            log.debug("[{}] menu {} closed", serverId, containerId);
         }
 
         @Override

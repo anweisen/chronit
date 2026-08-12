@@ -23,7 +23,7 @@ class ChatBusTest {
     @Test
     void completesWhenAMatchingLineArrives() throws Exception {
         ChatBus bus = new ChatBus();
-        try (ChatBus.Waiter waiter = bus.expect(Pattern.compile("(?i)logged in"))) {
+        try (SignalWaiter<ChatLine> waiter = bus.expect(Pattern.compile("(?i)logged in"))) {
             bus.publish(line("Welcome!"));
             bus.publish(line("You are now logged in."));
 
@@ -40,7 +40,7 @@ class ChatBusTest {
     @Test
     void doesNotMissAReplyThatArrivesImmediately() throws Exception {
         ChatBus bus = new ChatBus();
-        try (ChatBus.Waiter waiter = bus.expect(Pattern.compile("pong"))) {
+        try (SignalWaiter<ChatLine> waiter = bus.expect(Pattern.compile("pong"))) {
             bus.publish(line("pong"));
             assertEquals("pong", waiter.await(Duration.ofMillis(50)).plainText());
         }
@@ -49,7 +49,7 @@ class ChatBusTest {
     @Test
     void timesOutWhenNothingMatches() {
         ChatBus bus = new ChatBus();
-        try (ChatBus.Waiter waiter = bus.expect(Pattern.compile("never"))) {
+        try (SignalWaiter<ChatLine> waiter = bus.expect(Pattern.compile("never"))) {
             bus.publish(line("something else"));
             assertThrows(TimeoutException.class, () -> waiter.await(Duration.ofMillis(100)));
         }
@@ -58,7 +58,7 @@ class ChatBusTest {
     @Test
     void closingAWaiterStopsItReceivingLines() throws Exception {
         ChatBus bus = new ChatBus();
-        ChatBus.Waiter waiter = bus.expect(Pattern.compile("late"));
+        SignalWaiter<ChatLine> waiter = bus.expect(Pattern.compile("late"));
         waiter.close();
         bus.publish(line("late arrival"));
 
@@ -68,7 +68,7 @@ class ChatBusTest {
     @Test
     void abortingFailsOutstandingWaitsInsteadOfHanging() {
         ChatBus bus = new ChatBus();
-        try (ChatBus.Waiter waiter = bus.expect(Pattern.compile("never"))) {
+        try (SignalWaiter<ChatLine> waiter = bus.expect(Pattern.compile("never"))) {
             bus.abort("session ended");
             TimeoutException error = assertThrows(TimeoutException.class,
                     () -> waiter.await(Duration.ofSeconds(5)));

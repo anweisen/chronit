@@ -29,6 +29,18 @@ public interface ClientEvents {
     default void onCodeOfConduct(String text) {
     }
 
+    /**
+     * A container was opened, or the contents of an open one changed.
+     *
+     * <p>Fired on both because a window arrives empty and is populated a moment later, and a wait
+     * that cannot tell the difference would let a click land on a menu that is not there yet.
+     */
+    default void onScreen(ContainerInfo info) {
+    }
+
+    default void onScreenClose(int containerId) {
+    }
+
     default void onReady(ReadyInfo info) {
     }
 

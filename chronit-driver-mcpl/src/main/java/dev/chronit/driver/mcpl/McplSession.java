@@ -6,11 +6,13 @@ import dev.chronit.core.driver.ClientEvents;
 import dev.chronit.core.driver.ClientHandle;
 import dev.chronit.core.driver.ClientInformation;
 import dev.chronit.core.driver.ConnectRequest;
+import dev.chronit.core.driver.ContainerInfo;
 import dev.chronit.core.driver.DisconnectInfo;
 import dev.chronit.core.driver.Phase;
 import dev.chronit.core.driver.ReadyInfo;
 import dev.chronit.core.driver.ServerTarget;
 import dev.chronit.core.driver.SessionSettings;
+import dev.chronit.core.driver.SlotClick;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import org.geysermc.mcprotocollib.network.Session;
@@ -20,6 +22,11 @@ import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
 import org.geysermc.mcprotocollib.network.packet.Packet;
 import org.geysermc.mcprotocollib.network.session.ClientNetworkSession;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PositionElement;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.DropItemAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ShiftClickItemAction;
 import org.geysermc.mcprotocollib.protocol.data.game.setting.ChatVisibility;
 import org.geysermc.mcprotocollib.protocol.data.game.setting.ParticleStatus;
 import org.geysermc.mcprotocollib.protocol.data.game.setting.SkinPart;
@@ -40,12 +47,18 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.Clientbound
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerChatPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundStartConfigurationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerClosePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetContentPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetSlotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundOpenScreenPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchFinishedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchStartPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundPlayerLoadedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundChunkBatchReceivedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
@@ -61,6 +74,7 @@ import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -96,6 +110,15 @@ final class McplSession implements ClientHandle {
      * alive and has not desynchronised.
      */
     private static final int IDLE_STATUS_INTERVAL_TICKS = 20;
+
+    /** Container id 0 is the player's own inventory, which is never an "opened" window. */
+    private static final int PLAYER_INVENTORY_CONTAINER_ID = 0;
+
+    /**
+     * How long a click will wait for a freshly opened window to be populated. A server sends the
+     * open packet and the contents in quick succession; clicking in between does nothing.
+     */
+    private static final Duration CONTENTS_GRACE = Duration.ofSeconds(1);
 
     /** The server clamps the requested chunk rate to this range. */
     private static final float MIN_CHUNKS_PER_TICK = 0.01f;
@@ -134,6 +157,13 @@ final class McplSession implements ClientHandle {
     private volatile double z;
     private volatile float yaw;
     private volatile float pitch;
+
+    /**
+     * The container the server has opened, or null. Replaced wholesale rather than mutated so a
+     * reader always sees a consistent snapshot.
+     */
+    private final java.util.concurrent.atomic.AtomicReference<OpenContainer> container =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     private volatile long batchStartedAtNanos;
     private volatile ScheduledFuture<?> tickTask;
@@ -199,6 +229,58 @@ final class McplSession implements ClientHandle {
     }
 
     @Override
+    public Optional<ContainerInfo> openContainer() {
+        return Optional.ofNullable(container.get()).map(OpenContainer::toInfo);
+    }
+
+    @Override
+    public void clickSlot(SlotClick click) {
+        requireInWorld("inventory click");
+
+        OpenContainer open = awaitContents();
+        if (open == null) {
+            throw new IllegalStateException("No container is open — a click needs a menu, so send "
+                    + "the command that opens it first and wait for it with waitFor.screen");
+        }
+
+        int slot = resolveSlot(open, click);
+        ContainerActionType action = actionTypeFor(click.mode());
+
+        session.send(new ServerboundContainerClickPacket(
+                open.containerId(),
+                // Echoing the last state id the server sent is how it detects a desynchronised
+                // client. Getting it wrong costs a resync, not a rejected click.
+                open.stateId(),
+                slot,
+                action,
+                actionParamFor(click),
+                // The remaining two fields are the client's *prediction* of the result: what ends
+                // up on the cursor, and which slots change. Sending nothing predicted leaves the
+                // server authoritative — it applies the click and resyncs if its own outcome
+                // differs. For a plugin menu, which cancels the event and repaints anyway, that is
+                // both correct and the only honest option: a real prediction would mean hashing
+                // item data components, and a wrong hash is worse than no claim at all.
+                null,
+                Map.of()));
+
+        log.debug("Clicked slot {} ({}) in container {} at state {}",
+                slot, click.describe(), open.containerId(), open.stateId());
+    }
+
+    @Override
+    public void closeScreen() {
+        OpenContainer open = container.getAndSet(null);
+        if (open == null) {
+            return;
+        }
+        if (session.isConnected()) {
+            session.send(new ServerboundContainerClosePacket(open.containerId()));
+        }
+        log.debug("Closed container {}", open.containerId());
+        events.onScreenClose(open.containerId());
+    }
+
+    @Override
     public boolean isConnected() {
         return session.isConnected();
     }
@@ -213,6 +295,9 @@ final class McplSession implements ClientHandle {
         if (closing.compareAndSet(false, true)) {
             closeReason = reason;
             setPhase(Phase.LEAVING);
+            // A real client closes whatever window it had open before quitting, and a server that
+            // still thinks we are in a menu can hold the session open or refuse the next join.
+            closeScreen();
             // Acknowledge anything outstanding before going, as a real client would on quit.
             chat.flushAcknowledgements();
             session.disconnect(Component.text(reason == null ? "Disconnecting" : reason));
@@ -222,6 +307,140 @@ final class McplSession implements ClientHandle {
     @Override
     public void close() {
         disconnect(closeReason != null ? closeReason : "Session closed");
+    }
+
+    // ---------------------------------------------------------------- containers
+
+    /** A container the server has opened for us. */
+    private record OpenContainer(int containerId, String type, String title,
+                                 int stateId, int containerSlots, boolean contentsReceived) {
+
+        ContainerInfo toInfo() {
+            return new ContainerInfo(containerId, type, title, containerSlots, contentsReceived);
+        }
+    }
+
+    private void onOpenScreen(ClientboundOpenScreenPacket packet) {
+        OpenContainer open = new OpenContainer(
+                packet.getContainerId(),
+                String.valueOf(packet.getType()),
+                Components.plain(packet.getTitle()),
+                0,
+                -1,
+                false);
+        container.set(open);
+        log.info("Server opened menu {}", open.toInfo().describe());
+        events.onScreen(open.toInfo());
+    }
+
+    /**
+     * Records the contents of the open window.
+     *
+     * <p>The slot count is what makes addressing possible: the window numbers its own slots first
+     * and the player's inventory after them, so the boundary is the total minus the 36 slots a
+     * player always has.
+     */
+    private void onContainerContents(ClientboundContainerSetContentPacket packet) {
+        if (packet.getContainerId() == PLAYER_INVENTORY_CONTAINER_ID) {
+            return;
+        }
+        OpenContainer current = container.get();
+        if (current == null || current.containerId() != packet.getContainerId()) {
+            return;
+        }
+
+        int containerSlots = Math.max(0, packet.getItems().length - ContainerInfo.PLAYER_INVENTORY_SLOTS);
+        OpenContainer updated = new OpenContainer(current.containerId(), current.type(), current.title(),
+                packet.getStateId(), containerSlots, true);
+        container.set(updated);
+
+        log.debug("Menu {} populated: {} container slot(s), state {}",
+                updated.containerId(), containerSlots, packet.getStateId());
+        events.onScreen(updated.toInfo());
+    }
+
+    private void onContainerSlot(ClientboundContainerSetSlotPacket packet) {
+        OpenContainer current = container.get();
+        if (current == null || current.containerId() != packet.getContainerId()) {
+            return;
+        }
+        // Single-slot updates carry the newest state id, which the next click has to echo.
+        container.set(new OpenContainer(current.containerId(), current.type(), current.title(),
+                packet.getStateId(), current.containerSlots(), current.contentsReceived()));
+    }
+
+    private void onContainerClosed(int containerId) {
+        OpenContainer current = container.get();
+        if (current != null && current.containerId() == containerId) {
+            container.set(null);
+            log.debug("Server closed menu {}", containerId);
+            events.onScreenClose(containerId);
+        }
+    }
+
+    /**
+     * Returns the open container once its contents have arrived, waiting briefly if they have not.
+     *
+     * <p>Called from the action runner's thread rather than a network thread, so a short block is
+     * safe.
+     */
+    private OpenContainer awaitContents() {
+        long deadline = System.nanoTime() + CONTENTS_GRACE.toNanos();
+        OpenContainer open = container.get();
+        while (open != null && !open.contentsReceived() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return open;
+            }
+            open = container.get();
+        }
+        if (open != null && !open.contentsReceived()) {
+            log.warn("Menu {} has not sent its contents after {}; clicking anyway",
+                    open.containerId(), dev.chronit.core.util.Durations.format(CONTENTS_GRACE));
+        }
+        return open;
+    }
+
+    /** Maps a slot within one half of the window onto the window's single continuous range. */
+    private static int resolveSlot(OpenContainer open, SlotClick click) {
+        return switch (click.part()) {
+            case CONTAINER -> {
+                if (open.containerSlots() >= 0 && click.slot() >= open.containerSlots()) {
+                    throw new IllegalStateException("Slot " + click.slot() + " is outside this menu, "
+                            + "which has " + open.containerSlots() + " slot(s) (0-"
+                            + (open.containerSlots() - 1) + ")");
+                }
+                yield click.slot();
+            }
+            case PLAYER -> {
+                if (open.containerSlots() < 0) {
+                    throw new IllegalStateException("Cannot address a player inventory slot until the "
+                            + "menu reports its contents — its size is what says where the player "
+                            + "inventory begins");
+                }
+                yield open.containerSlots() + click.slot();
+            }
+        };
+    }
+
+    private static ContainerActionType actionTypeFor(SlotClick.ClickMode mode) {
+        return switch (mode) {
+            case PICKUP -> ContainerActionType.CLICK_ITEM;
+            case SHIFT -> ContainerActionType.SHIFT_CLICK_ITEM;
+            case DROP -> ContainerActionType.DROP_ITEM;
+        };
+    }
+
+    private static ContainerAction actionParamFor(SlotClick click) {
+        boolean left = click.button() == SlotClick.ClickButton.LEFT;
+        return switch (click.mode()) {
+            case PICKUP -> left ? ClickItemAction.LEFT_CLICK : ClickItemAction.RIGHT_CLICK;
+            case SHIFT -> left ? ShiftClickItemAction.LEFT_CLICK : ShiftClickItemAction.RIGHT_CLICK;
+            // Left drops one item, right drops the whole stack — matching the vanilla bindings.
+            case DROP -> left ? DropItemAction.DROP_FROM_SELECTED : DropItemAction.DROP_SELECTED_STACK;
+        };
     }
 
     private void requireInWorld(String what) {
@@ -600,6 +819,12 @@ final class McplSession implements ClientHandle {
                     chunksReceived.incrementAndGet();
                     evaluateReadiness();
                 }
+
+                // --- containers
+                case ClientboundOpenScreenPacket open -> onOpenScreen(open);
+                case ClientboundContainerSetContentPacket contents -> onContainerContents(contents);
+                case ClientboundContainerSetSlotPacket slot -> onContainerSlot(slot);
+                case ClientboundContainerClosePacket closed -> onContainerClosed(closed.getContainerId());
 
                 // --- chat
                 case ClientboundSystemChatPacket system -> onChatLine(ChatLine.of(

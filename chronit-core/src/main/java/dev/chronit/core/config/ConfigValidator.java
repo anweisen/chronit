@@ -180,10 +180,21 @@ public final class ConfigValidator {
         if (action.pause() != null) {
             set++;
         }
+        if (action.click() != null) {
+            set++;
+        }
+        if (action.closeScreen() != null) {
+            set++;
+        }
+        String choices = "'command', 'chat', 'wait', 'click' or 'closeScreen'";
         if (set == 0) {
-            problems.add(path + ": needs one of 'command', 'chat' or 'wait'");
+            problems.add(path + ": needs one of " + choices);
         } else if (set > 1) {
-            problems.add(path + ": set only one of 'command', 'chat' or 'wait'");
+            problems.add(path + ": set only one of " + choices);
+        }
+
+        if (action.click() != null) {
+            validateClick(action.click(), path + ".click", problems);
         }
 
         if (action.command() != null && action.command().startsWith("/")) {
@@ -197,13 +208,38 @@ public final class ConfigValidator {
         requireNonNegative(action.delayAfter(), path + ".delayAfter", problems);
 
         if (action.waitFor() != null) {
-            WaitForConfig waitFor = action.waitFor();
-            if (isBlank(waitFor.chat())) {
-                problems.add(path + ".waitFor.chat: required");
-            } else {
-                requireRegex(waitFor.chat(), path + ".waitFor.chat", problems);
-            }
-            requireNonNegative(waitFor.timeout(), path + ".waitFor.timeout", problems);
+            validateWaitFor(action.waitFor(), path + ".waitFor", problems);
+        }
+    }
+
+    private static void validateWaitFor(WaitForConfig waitFor, String path, List<String> problems) {
+        boolean hasChat = waitFor.chat() != null;
+        boolean hasScreen = waitFor.screen() != null;
+
+        if (hasChat && hasScreen) {
+            problems.add(path + ": set only one of 'chat' or 'screen'");
+        } else if (!hasChat && !hasScreen) {
+            problems.add(path + ": needs 'chat' or 'screen'");
+        } else if (hasChat && waitFor.chat().isBlank()) {
+            // An empty screen pattern is meaningful — any menu will do — but an empty chat pattern
+            // matches every message, which is never what someone meant to write.
+            problems.add(path + ".chat: must not be blank");
+        } else {
+            requireRegex(waitFor.pattern(), path + "." + (hasScreen ? "screen" : "chat"), problems);
+        }
+
+        requireNonNegative(waitFor.timeout(), path + ".timeout", problems);
+    }
+
+    private static void validateClick(ClickConfig click, String path, List<String> problems) {
+        if (click.slot() == null) {
+            problems.add(path + ".slot: required");
+        } else if (click.slot() < 0) {
+            problems.add(path + ".slot: must not be negative");
+        } else if (click.inventory() == dev.chronit.core.driver.SlotClick.InventoryPart.PLAYER
+                && click.slot() >= dev.chronit.core.driver.ContainerInfo.PLAYER_INVENTORY_SLOTS) {
+            problems.add(path + ".slot: " + click.slot() + " is outside the player inventory "
+                    + "(0-26 are the main rows, 27-35 the hotbar)");
         }
     }
 

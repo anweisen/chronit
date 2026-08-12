@@ -13,6 +13,8 @@ import org.geysermc.mcprotocollib.protocol.codec.MinecraftCodec;
 import org.geysermc.mcprotocollib.protocol.data.ProtocolState;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerSpawnInfo;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import org.geysermc.mcprotocollib.protocol.data.handshake.HandshakeIntent;
 import org.geysermc.mcprotocollib.protocol.packet.handshake.serverbound.ClientIntentionPacket;
 import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundResourcePackPushPacket;
@@ -22,6 +24,9 @@ import org.geysermc.mcprotocollib.protocol.packet.configuration.serverbound.Serv
 import org.geysermc.mcprotocollib.protocol.packet.cookie.clientbound.ClientboundCookieRequestPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerClosePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetContentPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundOpenScreenPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchFinishedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchStartPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
@@ -58,6 +63,13 @@ final class FakeMinecraftServer implements AutoCloseable {
     private final int port;
 
     private volatile Session clientSession;
+
+    /** When set, this command triggers a menu — the way a plugin responds to /rewards. */
+    private volatile MenuTrigger menuTrigger;
+
+    private record MenuTrigger(String command, int containerId, String title,
+                               int containerSlots, int stateId) {
+    }
 
     /** What the scripted server should demand of the client. */
     record Options(boolean sendCodeOfConduct,
@@ -127,6 +139,49 @@ final class FakeMinecraftServer implements AutoCloseable {
         return clientConnected.await(timeoutMillis, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * Opens a menu and populates it, the way a plugin does: the window first, the contents a
+     * moment later.
+     *
+     * @param containerSlots slots belonging to the menu itself, before the player's own inventory
+     * @return the state id sent with the contents, which a click must echo back
+     */
+    int openMenu(int containerId, String title, int containerSlots, int stateId) {
+        Session session = clientSession;
+        if (session == null || !session.isConnected()) {
+            throw new IllegalStateException("No client connected");
+        }
+        // The Component overload rather than the deprecated String one: besides being current,
+        // the deprecated signature mentions a Lombok annotation that is not on the classpath, and
+        // javac fails trying to render the deprecation warning.
+        session.send(new ClientboundOpenScreenPacket(
+                containerId, ContainerType.GENERIC_9X3, Component.text(title)));
+
+        // A window always carries the player's 36 slots after its own.
+        ItemStack[] items = new ItemStack[containerSlots + 36];
+        for (int i = 0; i < containerSlots; i++) {
+            items[i] = new ItemStack(1, 1);
+        }
+        session.send(new ClientboundContainerSetContentPacket(containerId, stateId, items, null));
+        return stateId;
+    }
+
+    /**
+     * Opens the given menu when the client sends {@code command}, which is how a plugin actually
+     * behaves and what makes a waitFor on the menu meaningful rather than a race against a timer.
+     */
+    void openMenuOnCommand(String command, int containerId, String title, int containerSlots, int stateId) {
+        this.menuTrigger = new MenuTrigger(command, containerId, title, containerSlots, stateId);
+    }
+
+    /** Tells the client the server closed the menu. */
+    void closeMenu(int containerId) {
+        Session session = clientSession;
+        if (session != null && session.isConnected()) {
+            session.send(new ClientboundContainerClosePacket(containerId));
+        }
+    }
+
     /** Sends a system chat message, for exercising waitFor and readiness patterns. */
     void say(String message) {
         Session session = clientSession;
@@ -185,6 +240,16 @@ final class FakeMinecraftServer implements AutoCloseable {
                 session.switchInboundState(() -> protocol.setInboundState(ProtocolState.CONFIGURATION));
                 protocol.setOutboundState(ProtocolState.CONFIGURATION);
                 sendConfigurationGates(session);
+                return;
+            }
+
+            MenuTrigger trigger = menuTrigger;
+            if (trigger != null
+                    && packet instanceof org.geysermc.mcprotocollib.protocol.packet.ingame
+                    .serverbound.ServerboundChatCommandPacket command
+                    && command.getCommand().equals(trigger.command())) {
+                openMenu(trigger.containerId(), trigger.title(),
+                        trigger.containerSlots(), trigger.stateId());
                 return;
             }
 

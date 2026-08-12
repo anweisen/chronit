@@ -8,6 +8,8 @@ import dev.chronit.core.run.Orchestrator;
 import dev.chronit.core.state.RunRecord;
 import dev.chronit.core.util.Redactor;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -110,6 +112,132 @@ class EndToEndVisitTest {
                 // The history is what an operator reads the morning after; it must persist.
                 assertTrue(orchestrator.history().file().toFile().isFile());
                 assertEquals(1, orchestrator.history().recent(10).size());
+            } finally {
+                driver.shutdown();
+            }
+        }
+    }
+
+    /**
+     * The whole menu interaction as a user would configure it: a command opens a plugin menu, the
+     * sequence waits for it by title, clicks a slot, and closes it.
+     */
+    @Test
+    void runsAMenuInteractionFromConfiguration(@TempDir Path stateDir) throws Exception {
+        try (FakeMinecraftServer server = new FakeMinecraftServer(FakeMinecraftServer.Options.bare()).start()) {
+
+            // Opens the menu when the client sends the command that asks for it, which is what a
+            // plugin does and what makes the waitFor meaningful.
+            server.openMenuOnCommand("rewards", 5, "Daily Rewards", 27, 11);
+
+            ChronitConfig config = new ConfigLoader(Map.of()).loadString("""
+                    stateDir: "%s"
+                    defaults:
+                      jitter: 0
+                      readyWhen:
+                        settle: 50ms
+                        timeout: 30s
+                    accounts:
+                      - id: bot
+                        auth: OFFLINE
+                        username: ChronitBot
+                    servers:
+                      - id: local
+                        host: 127.0.0.1
+                        port: %d
+                    jobs:
+                      - id: rewards
+                        cron: "0 20 * * *"
+                        visits:
+                          - server: local
+                            account: bot
+                            onReady:
+                              - command: "rewards"
+                                waitFor:
+                                  screen: "(?i)daily rewards"
+                                  timeout: 10s
+                                  onTimeout: FAIL
+                              - click: { slot: 13 }
+                                delayAfter: 100ms
+                              - closeScreen: true
+                    """.formatted(yamlPath(stateDir), server.port()));
+
+            McplDriver driver = new McplDriver();
+            try {
+                Orchestrator orchestrator = new Orchestrator(
+                        config, driver, new AccountManager(stateDir, new TokenStore(null)));
+                RunRecord record = orchestrator.runJob(config.job("rewards").orElseThrow(), "test")
+                        .orElseThrow();
+
+                RunRecord.VisitRecord visit = record.visits().getFirst();
+                assertTrue(record.succeeded(), "visit should succeed, got: " + visit.detail());
+                assertEquals(3, visit.actionsRun(), "command, click and close all count");
+
+                List<ServerboundContainerClickPacket> clicks =
+                        server.packets(ServerboundContainerClickPacket.class);
+                assertEquals(1, clicks.size(), "exactly one click should have been sent");
+                assertEquals(5, clicks.getFirst().getContainerId());
+                assertEquals(13, clicks.getFirst().getSlot());
+                assertEquals(11, clicks.getFirst().getStateId(),
+                        "the click must echo the state id the menu was populated with");
+
+                assertEquals(1, server.packets(ServerboundContainerClosePacket.class).size(),
+                        "the menu should be closed once, by the closeScreen action");
+            } finally {
+                driver.shutdown();
+            }
+        }
+    }
+
+    /** A menu that never opens must fail the visit rather than clicking into nothing. */
+    @Test
+    void failsTheVisitWhenTheMenuNeverOpens(@TempDir Path stateDir) throws Exception {
+        try (FakeMinecraftServer server = new FakeMinecraftServer(FakeMinecraftServer.Options.bare()).start()) {
+            ChronitConfig config = new ConfigLoader(Map.of()).loadString("""
+                    stateDir: "%s"
+                    defaults:
+                      jitter: 0
+                      readyWhen:
+                        settle: 50ms
+                        timeout: 30s
+                      onFail:
+                        retries: 0
+                    accounts:
+                      - id: bot
+                        auth: OFFLINE
+                        username: ChronitBot
+                    servers:
+                      - id: local
+                        host: 127.0.0.1
+                        port: %d
+                    jobs:
+                      - id: rewards
+                        cron: "0 20 * * *"
+                        visits:
+                          - server: local
+                            account: bot
+                            onReady:
+                              - command: "rewards"
+                                waitFor:
+                                  screen: "(?i)daily rewards"
+                                  timeout: 1s
+                                  onTimeout: FAIL
+                              - click: { slot: 13 }
+                    """.formatted(yamlPath(stateDir), server.port()));
+
+            McplDriver driver = new McplDriver();
+            try {
+                Orchestrator orchestrator = new Orchestrator(
+                        config, driver, new AccountManager(stateDir, new TokenStore(null)));
+                RunRecord record = orchestrator.runJob(config.job("rewards").orElseThrow(), "test")
+                        .orElseThrow();
+
+                assertFalse(record.succeeded());
+                assertTrue(record.visits().getFirst().detail().contains("menu"),
+                        "the failure should name what it waited for: "
+                                + record.visits().getFirst().detail());
+                assertTrue(server.packets(ServerboundContainerClickPacket.class).isEmpty(),
+                        "no click should be sent when the menu never appeared");
             } finally {
                 driver.shutdown();
             }

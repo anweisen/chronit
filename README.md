@@ -159,6 +159,46 @@ onLeave:
 on when the server is slow. The waiter is registered before the command is sent, so a reply arriving
 within a millisecond is not missed.
 
+### Clicking plugin menus
+
+A great many rewards live behind an inventory GUI: a command opens a menu, and the thing you want is
+a slot in it.
+
+```yaml
+onReady:
+  - command: "rewards"
+    waitFor:
+      screen: "(?i)daily rewards"   # matched against the menu title; "" accepts any menu
+      timeout: 10s
+      onTimeout: FAIL
+  - click: { slot: 13 }
+    delayAfter: 500ms
+  - closeScreen: true
+```
+
+`slot` counts within the **opened menu** — the top inventory — starting at 0, so a configuration does
+not need to know how large the menu is. `inventory: PLAYER` addresses your own inventory underneath
+instead, where 0-26 are the three main rows and 27-35 the hotbar; that mapping needs the menu's size,
+which the server only reveals with the contents. `button` (`LEFT`/`RIGHT`) and `mode`
+(`PICKUP`/`SHIFT`/`DROP`) both default to an ordinary left click.
+
+Three details make this reliable rather than flaky:
+
+- **`waitFor.screen` waits for a menu that is open *and populated*.** A server sends the window
+  first and fills it a moment later; a click in that gap lands on an empty slot and does nothing.
+  The wait is registered before the command goes out, because menus often open within a millisecond.
+- **The click echoes the menu's current state id**, which is how the server detects a client working
+  from a stale view. It is tracked from every content and slot update the server sends.
+- **The click claims no prediction.** A real client also tells the server which slots it expects to
+  change and what ends up on the cursor; sending nothing predicted leaves the server authoritative,
+  so it applies the click and resyncs if its own outcome differs. For a plugin menu — which cancels
+  the event and repaints anyway — that is both correct and the honest option, since a real prediction
+  would mean hashing item data components and a wrong hash is worse than no claim at all.
+
+Clicking with no menu open, or naming a slot outside it, fails the visit with a message saying so
+rather than sending a packet the server will ignore. The menu is closed automatically before
+disconnecting, as a real client does.
+
 Commands go out on the unsigned command packet, which carries no signature or acknowledgement
 fields — which is why command sequences work even on servers with `enforce-secure-profile=true`.
 Plain `chat:` messages are signed when the account has a usable certificate.
@@ -305,7 +345,10 @@ precisely. That makes it possible to assert, without a real server or a network:
 - the initial teleport is confirmed and chunk batches acknowledged
 - readiness waits for a configured chat pattern and times out cleanly when it never arrives
 - commands arrive without a leading slash, and `sendCommand` refuses before the world is loaded
-- a whole configured job runs end to end, with secrets substituted and the history persisted
+- a menu click names the right slot, echoes the state id it was populated with, and claims no
+  prediction; player-inventory slots are offset past the menu; out-of-range slots never reach the wire
+- a whole configured job runs end to end, with secrets substituted and the history persisted —
+  including a command that opens a menu, a click, and a close
 
 A `test` profile in the compose file brings up a real offline-mode Paper server with an enforced
 resource pack, for checking against something that is not a test double:
@@ -346,6 +389,9 @@ consumer's compile classpath carries what it is meant to use and no more.
   has not been run against a real legacy server here.
 - **One account, one server at a time.** Logging in again invalidates the earlier session, so visits
   sharing an account are serialised. That is enforced, not merely documented.
+- **Menu clicks address slots, not items.** There is no "click the slot containing a diamond" —
+  slot indices are stable in the plugin menus this is for, and matching on item identity would mean
+  decoding item data components the click path deliberately avoids.
 
 ## A note on server rules
 
