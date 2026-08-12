@@ -1,0 +1,15 @@
+target/
+*.class
+*.jar
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Runtime data — tokens, state and cached resource packs must never be committed.
+/data/
+chronit.yml
+secrets.yml
+!config/chronit.example.yml

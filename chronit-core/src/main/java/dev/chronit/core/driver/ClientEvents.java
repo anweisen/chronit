@@ -1,0 +1,37 @@
+package dev.chronit.core.driver;
+
+/**
+ * Callbacks a driver invokes as a session progresses.
+ *
+ * <p>All methods have no-op defaults so an implementation only overrides what it cares about.
+ * Called from network threads: implementations must not block.
+ */
+public interface ClientEvents {
+
+    ClientEvents NONE = new ClientEvents() {
+    };
+
+    default void onPhase(Phase phase) {
+    }
+
+    default void onChat(ChatLine line) {
+    }
+
+    /** Reports each resource pack status the driver sent on our behalf. */
+    default void onResourcePack(ResourcePackEvent event) {
+    }
+
+    /**
+     * The server presented a code of conduct, which since Minecraft 26.x must be accepted during
+     * configuration or the connection is dropped. The driver has already replied by the time this
+     * is called; the text is surfaced because agreeing to something unread is worth logging.
+     */
+    default void onCodeOfConduct(String text) {
+    }
+
+    default void onReady(ReadyInfo info) {
+    }
+
+    default void onDisconnect(DisconnectInfo info) {
+    }
+}

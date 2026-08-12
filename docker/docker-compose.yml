@@ -1,0 +1,50 @@
+services:
+  chronit:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        # Set to "true" to bundle ViaVersion, letting the client join servers running older
+        # protocols. Adds several megabytes; leave false unless you need it.
+        VIA: "false"
+    image: chronit:latest
+    container_name: chronit
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Berlin
+      CHRONIT_CONFIG: /data/chronit.yml
+      # Encrypts the stored Microsoft session at rest. Keep it stable — changing it makes the
+      # existing token file unreadable and forces a fresh login.
+      CHRONIT_SECRET_KEY: ${CHRONIT_SECRET_KEY:-}
+      # Server passwords can be supplied here instead of the secrets file. They are masked in
+      # the log either way.
+      # CHRONIT_SECRET_SURVIVAL_PASSWORD: ${SURVIVAL_PASSWORD:-}
+      CHRONIT_LOG_LEVEL: INFO
+    volumes:
+      - chronit-data:/data
+    ports:
+      # Only reachable from the host. Publish more widely only with web.token set.
+      - "127.0.0.1:8477:8477"
+
+  # Local Paper server for end-to-end testing. Offline mode, so the `test` account in the example
+  # configuration can join without touching a real Microsoft account.
+  paper:
+    image: itzg/minecraft-server:latest
+    container_name: chronit-paper
+    profiles: ["test"]
+    environment:
+      EULA: "TRUE"
+      TYPE: PAPER
+      ONLINE_MODE: "FALSE"
+      MEMORY: 2G
+      # Exercises the resource pack path, which is the point of testing against a real server.
+      RESOURCE_PACK: "https://example.invalid/pack.zip"
+      RESOURCE_PACK_ENFORCE: "TRUE"
+    ports:
+      - "127.0.0.1:25565:25565"
+    volumes:
+      - paper-data:/data
+
+volumes:
+  chronit-data:
+  paper-data:

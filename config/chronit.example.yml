@@ -1,0 +1,179 @@
+# chronit — scheduled Minecraft server check-in
+#
+# Durations accept either the compact form (30s, 5m, 1h30m, 250ms) or ISO-8601 (PT30M).
+# Any string may contain ${ENV_VAR} or ${ENV_VAR:-fallback}, and {{secrets.name}} for values
+# from the secrets file. Every resolved secret is masked in the log.
+
+# Where tokens, run history and the resource pack cache live. One mounted volume is enough.
+stateDir: /data
+
+# Optional. A YAML file of `name: value` pairs, referenced as {{secrets.name}} below.
+# Values can also come from the environment as CHRONIT_SECRET_<NAME>, which wins over the file.
+secretsFile: /data/secrets.yml
+
+
+# ---------------------------------------------------------------------------------------------
+# Settings applied to every server unless the server overrides them.
+# ---------------------------------------------------------------------------------------------
+defaults:
+  # Sent on the minecraft:brand channel. Vanilla sends "vanilla"; anything else is visible to
+  # server plugins.
+  brand: vanilla
+
+  # Randomises every configured delay by this fraction, so repeated runs are not identical to
+  # the millisecond.
+  jitter: 0.15
+
+  clientInformation:
+    locale: en_us
+    viewDistance: 8
+    chatVisibility: FULL      # FULL | SYSTEM | HIDDEN
+    mainHand: RIGHT
+    allowServerListings: true
+
+  # How to answer a server that pushes a resource pack. Servers with require-resource-pack=true
+  # disconnect a client that declines, so the default accepts.
+  resourcePack:
+    # FAKE     — never fetch anything; report the vanilla success sequence after plausible delays.
+    # DOWNLOAD — actually fetch it and report real elapsed time. More convincing against plugins
+    #            that compare pack size against how long the client took. Cached by hash.
+    # DECLINE  — refuse. Expect a kick when the pack is required; useful for diagnosis.
+    mode: DOWNLOAD
+    strict: false             # DOWNLOAD only: fail on a SHA-1 mismatch instead of accepting anyway
+    maxSizeMb: 250
+    downloadDelay: 1500ms     # FAKE only: how long to pretend the download took
+    applyDelay: 800ms         # how long to pretend applying it took
+
+  # Minecraft 26.x can require accepting a code of conduct during the configuration phase.
+  # Refusing means the server closes the connection.
+  acceptCodeOfConduct: true
+
+  # Follow a server that transfers us elsewhere, as a real client does.
+  followTransfers: true
+
+  connectTimeout: 30s
+
+  # When the client counts as "in the world" and commands may start.
+  readyWhen:
+    spawn: true               # the join packet plus a confirmed initial teleport
+    settle: 2s                # extra pause once the conditions hold
+    timeout: 60s
+
+  # AUTO — sign chat when the account has a usable certificate, otherwise carry on.
+  # ON   — require signing; fail the visit without a certificate.
+  # OFF  — never sign. Commands are unaffected either way; only plain chat needs this.
+  secureChat: AUTO
+
+  onFail:
+    retries: 1
+    backoff: 30s
+    then: SKIP                # SKIP | ABORT_JOB
+
+
+# ---------------------------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------------------------
+accounts:
+  - id: main
+    auth: MICROSOFT
+    # Run `chronit login main` once. The session is refreshed automatically afterwards and needs
+    # renewing roughly every 90 days.
+    tokenStore: /data/tokens/main.json
+    # Optional: your own Azure application (client) ID with public client flows enabled.
+    # clientId: ${AZURE_CLIENT_ID}
+
+  # Offline accounts need no login and only work against servers with online-mode=false —
+  # which makes them right for local testing.
+  - id: test
+    auth: OFFLINE
+    username: ChronitBot
+
+
+# ---------------------------------------------------------------------------------------------
+# Servers
+# ---------------------------------------------------------------------------------------------
+servers:
+  - id: survival
+    host: mc.example.net
+    port: 25565
+    # auto  — connect natively first and only fall back to translation if the version is refused.
+    #         Correct for the great majority of servers, including those running ViaVersion
+    #         server-side, which accept far newer clients than they advertise.
+    # 776   — force a specific protocol number.
+    # 1.20.4 — force a named version. Needs the ViaVersion module (the -via image).
+    protocol: auto
+
+  - id: minigames
+    host: play.example.org
+    resourcePack:
+      mode: FAKE              # this one pushes a 300 MB pack; no point downloading it
+    readyWhen:
+      # This network parks arriving players in a lobby before the real world, and announces the
+      # handover in chat. Waiting for that is more reliable than guessing a delay.
+      chat: "(?i)welcome to"
+      timeout: 90s
+
+  - id: paper-local
+    host: paper
+    port: 25565
+
+  # Servers can be reached through a proxy, for instance when several accounts must not appear
+  # to share an address.
+  # - id: behind-proxy
+  #   host: mc.example.com
+  #   proxy:
+  #     type: SOCKS5
+  #     host: 10.0.0.5
+  #     port: 1080
+
+
+# ---------------------------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------------------------
+jobs:
+  - id: nightly
+    # Five fields, or six when the first is seconds.
+    cron: "0 20 * * *"
+    timezone: Europe/Berlin
+    overlap: SKIP             # SKIP | QUEUE — what to do if the previous run is still going
+    misfire: IGNORE           # IGNORE | RUN_ONCE — catch up on a run missed while stopped
+    enabled: true
+
+    visits:
+      - server: survival
+        account: main
+        # Total time present on the server, measured from reaching the world — not additional to
+        # however long the commands took.
+        stayFor: 30m
+        gapAfter: 10s
+        onReady:
+          - command: "login {{secrets.survival_password}}"
+            # Waiting for the reply beats a fixed delay: it continues the moment the server
+            # answers, and still holds on when the server is slow.
+            waitFor:
+              chat: "(?i)successfully logged in|already logged in"
+              timeout: 10s
+              onTimeout: CONTINUE     # CONTINUE | STOP | FAIL
+            delayAfter: 1s
+          - command: "warp daily"
+            delayAfter: 5s
+          - command: "daily claim"
+        onLeave:
+          - command: "logout"
+
+      - server: minigames
+        account: main
+        stayFor: 5m
+        onReady:
+          - wait: 3s
+          - chat: "gg"
+
+
+# ---------------------------------------------------------------------------------------------
+# Optional status and login interface. Disabled by default.
+# ---------------------------------------------------------------------------------------------
+web:
+  enabled: false
+  bind: 127.0.0.1             # a token is required when this is not loopback
+  port: 8477
+  # token: ${CHRONIT_WEB_TOKEN}

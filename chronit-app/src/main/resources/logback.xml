@@ -1,0 +1,25 @@
+<configuration>
+  <!--
+    Everything rendered goes through %redact, which masks values that came from the secrets file
+    or CHRONIT_SECRET_* environment variables. Server login passwords appear in command text, so
+    an unredacted log would leak them to anyone who can read container output.
+  -->
+  <conversionRule conversionWord="redact" class="dev.chronit.app.RedactingConverter"/>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%redact(%d{yyyy-MM-dd HH:mm:ss} %-5level %-22logger{0} %msg%n)</pattern>
+    </encoder>
+  </appender>
+
+  <!-- Netty and the protocol library are noisy at debug; raise them only when investigating. -->
+  <logger name="io.netty" level="WARN"/>
+  <logger name="org.geysermc.mcprotocollib" level="INFO"/>
+  <logger name="com.viaversion" level="INFO"/>
+  <logger name="ViaLoader" level="INFO"/>
+  <logger name="dev.chronit" level="${CHRONIT_LOG_LEVEL:-INFO}"/>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+</configuration>
