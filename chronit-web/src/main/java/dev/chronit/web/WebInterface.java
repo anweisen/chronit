@@ -1,5 +1,8 @@
 package dev.chronit.web;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import dev.chronit.core.auth.AccountManager;
@@ -11,29 +14,41 @@ import dev.chronit.core.config.WebConfig;
 import dev.chronit.core.run.Orchestrator;
 import dev.chronit.core.run.Scheduler;
 import dev.chronit.core.state.RunRecord;
-import dev.chronit.core.util.Durations;
+import dev.chronit.web.view.DashboardView;
+import dev.chronit.web.view.LoginView;
+import dev.chronit.web.view.RunsView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 
 /**
- * A small status and login interface.
+ * A small status and sign-in interface.
  *
  * <p>It exists mainly for one awkward moment: the Microsoft refresh token expires roughly every
  * ninety days, and re-authorising means reading a short-lived code out of a container's logs and
  * typing it before it expires. A page with a button is a better answer to that than
  * {@code docker logs -f}.
  *
- * <p>Built on the JDK's own HTTP server. The whole interface is a handful of server-rendered pages;
- * an embedded servlet container would add several megabytes to the image for no benefit.
+ * <p>Built on the JDK's own HTTP server — the whole interface is a few server-rendered pages and a
+ * small JSON endpoint, and an embedded servlet container would add megabytes to the image for
+ * nothing. Pages are rendered through a typed HTML builder rather than string concatenation,
+ * because everything shown here (server names, kick reasons, menu titles) comes from outside the
+ * process and a forgotten escape would be an injection hole.
  */
 public final class WebInterface {
 
@@ -41,21 +56,39 @@ public final class WebInterface {
 
     private static final int RECENT_RUNS = 25;
 
+    /**
+     * Account status reads parse a token file from disk. The dashboard polls, so without a short
+     * cache every poll would hit the filesystem once per account for information that changes a few
+     * times a year.
+     */
+    private static final Duration STATUS_CACHE_TTL = Duration.ofSeconds(5);
+
+    private static final String SESSION_COOKIE = "chronit_session";
+
     private final ChronitConfig config;
     private final WebConfig webConfig;
+    /** e.g. "Minecraft 26.2 · protocol 776" — supplied by the app, which knows the driver. */
+    private final String clientSummary;
     private final Orchestrator orchestrator;
     private final Scheduler scheduler;
     private final AccountManager accounts;
     private final LoginFlows logins;
+    private final ObjectMapper json = new ObjectMapper();
+
+    private final Assets assets = new Assets();
+    private volatile Map<String, AccountStatus> cachedStatuses = Map.of();
+    private volatile Instant statusesFetchedAt = Instant.EPOCH;
 
     private HttpServer server;
 
     public WebInterface(ChronitConfig config,
                         Orchestrator orchestrator,
                         Scheduler scheduler,
-                        AccountManager accounts) {
+                        AccountManager accounts,
+                        String clientSummary) {
         this.config = config;
         this.webConfig = config.webOrDisabled();
+        this.clientSummary = clientSummary;
         this.orchestrator = orchestrator;
         this.scheduler = scheduler;
         this.accounts = accounts;
@@ -72,14 +105,17 @@ public final class WebInterface {
         }));
 
         // Unauthenticated and reachable from anywhere, so it must never reveal anything.
-        server.createContext("/healthz", exchange -> respond(exchange, 200, "text/plain", "ok"));
+        server.createContext("/healthz", exchange -> {
+            respond(exchange, 200, "text/plain", "ok".getBytes(StandardCharsets.UTF_8), null);
+            exchange.close();
+        });
 
         server.createContext("/", this::route);
         server.start();
 
         log.info("Web interface on http://{}:{}{}",
                 webConfig.bindOrDefault(), webConfig.portOrDefault(),
-                webConfig.token() != null ? " (token required)" : "");
+                requiresToken() ? " (token required)" : "");
     }
 
     public void stop() {
@@ -88,135 +124,215 @@ public final class WebInterface {
         }
     }
 
+    // ------------------------------------------------------------------ routing
+
     private void route(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        String method = exchange.getRequestMethod();
         try {
-            if (!isAuthorised(exchange)) {
-                respond(exchange, 401, "text/plain", "Unauthorised. Supply the configured token as "
-                        + "an Authorization: Bearer header or a ?token= parameter.");
+            // Assets carry no information and are needed by the sign-in page itself.
+            if (path.startsWith("/assets/")) {
+                serveAsset(exchange, path.substring("/assets/".length()));
                 return;
             }
-
-            String path = exchange.getRequestURI().getPath();
-            String method = exchange.getRequestMethod();
+            if (path.equals("/session") && method.equals("POST")) {
+                exchangeTokenForCookie(exchange);
+                return;
+            }
+            if (!isAuthorised(exchange)) {
+                denyOrPrompt(exchange);
+                return;
+            }
 
             if (path.equals("/") || path.isEmpty()) {
-                respond(exchange, 200, "text/html", dashboard());
+                html(exchange, 200, DashboardView.render(dashboardModel(), assets.version()));
                 return;
             }
-            if (path.startsWith("/jobs/") && path.endsWith("/run") && method.equals("POST")) {
-                runJob(exchange, path.substring("/jobs/".length(), path.length() - "/run".length()));
+            if (path.equals("/fragments/runs")) {
+                html(exchange, 200, RunsView.render(recentRuns()));
+                return;
+            }
+            if (path.equals("/api/state")) {
+                json(exchange, 200, stateJson());
+                return;
+            }
+            if (path.startsWith("/api/jobs/") && path.endsWith("/run") && method.equals("POST")) {
+                runJob(exchange, decode(path.substring("/api/jobs/".length(), path.length() - "/run".length())));
                 return;
             }
             if (path.startsWith("/accounts/") && path.endsWith("/login")) {
-                handleLogin(exchange, path.substring("/accounts/".length(), path.length() - "/login".length()));
+                String accountId = decode(path.substring("/accounts/".length(), path.length() - "/login".length()));
+                if (method.equals("GET")) {
+                    loginPage(exchange, accountId);
+                } else {
+                    respond(exchange, 405, "text/plain", "Use the API endpoint".getBytes(StandardCharsets.UTF_8), null);
+                }
                 return;
             }
-            respond(exchange, 404, "text/plain", "Not found");
+            if (path.startsWith("/api/accounts/") && path.endsWith("/login")) {
+                String accountId = decode(
+                        path.substring("/api/accounts/".length(), path.length() - "/login".length()));
+                loginApi(exchange, accountId, method);
+                return;
+            }
+            respond(exchange, 404, "text/plain", "Not found".getBytes(StandardCharsets.UTF_8), null);
         } catch (RuntimeException e) {
             log.warn("Request {} failed: {}", exchange.getRequestURI(), e.toString(), e);
-            respond(exchange, 500, "text/plain", "Internal error");
+            respond(exchange, 500, "text/plain", "Internal error".getBytes(StandardCharsets.UTF_8), null);
         } finally {
             exchange.close();
         }
     }
 
+    // ------------------------------------------------------------------ auth
+
+    private boolean requiresToken() {
+        return webConfig.token() != null && !webConfig.token().isBlank();
+    }
+
     /**
-     * Constant-time token comparison.
+     * Accepts a bearer header for tooling, or the session cookie for a browser.
      *
-     * <p>Configuration validation already refuses a non-loopback bind without a token, so the
-     * unauthenticated path only applies to a loopback listener.
+     * <p>Compared in constant time. The token is deliberately not accepted as a query parameter:
+     * that puts it in browser history, in any referrer the page emits, and in access logs. A
+     * browser gets it once through a form post and keeps it in an HttpOnly cookie afterwards.
      */
     private boolean isAuthorised(HttpExchange exchange) {
-        String expected = webConfig.token();
-        if (expected == null || expected.isBlank()) {
+        if (!requiresToken()) {
             return true;
         }
         String header = exchange.getRequestHeaders().getFirst("Authorization");
-        String presented = header != null && header.startsWith("Bearer ")
-                ? header.substring("Bearer ".length())
-                : queryParam(exchange, "token").orElse("");
+        if (header != null && header.startsWith("Bearer ") && matchesToken(header.substring(7))) {
+            return true;
+        }
+        return cookie(exchange, SESSION_COOKIE).filter(this::matchesToken).isPresent();
+    }
 
+    private boolean matchesToken(String presented) {
         return MessageDigest.isEqual(
                 presented.getBytes(StandardCharsets.UTF_8),
-                expected.getBytes(StandardCharsets.UTF_8));
+                webConfig.token().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void denyOrPrompt(HttpExchange exchange) throws IOException {
+        boolean wantsJson = exchange.getRequestURI().getPath().startsWith("/api/")
+                || "application/json".equals(exchange.getRequestHeaders().getFirst("Accept"));
+        if (wantsJson) {
+            json(exchange, 401, "{\"error\":\"unauthorised\"}");
+            return;
+        }
+        html(exchange, 401, LoginView.tokenGate(assets.version(), false));
+    }
+
+    private void exchangeTokenForCookie(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        String presented = formField(body, "token").orElse("");
+
+        if (!requiresToken() || matchesToken(presented)) {
+            // Strict same-site and HttpOnly: the dashboard has action endpoints, so the cookie must
+            // not ride along with a cross-site request or be readable by script.
+            exchange.getResponseHeaders().add("Set-Cookie",
+                    SESSION_COOKIE + "=" + presented + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800");
+            redirect(exchange, "/");
+            return;
+        }
+        html(exchange, 401, LoginView.tokenGate(assets.version(), true));
     }
 
     // ------------------------------------------------------------------ pages
 
-    private String dashboard() {
-        StringBuilder body = new StringBuilder();
+    private DashboardView.Model dashboardModel() {
+        return new DashboardView.Model(
+                config,
+                scheduler.upcoming(),
+                accountStatuses(),
+                recentRuns(),
+                runsVersion(),
+                clientSummary,
+                orchestrator.protocols().hasTranslation());
+    }
 
-        body.append("<h2>Schedule</h2><table><tr><th>Job</th><th>Cron</th><th>Next run</th>")
-                .append("<th>In</th><th></th></tr>");
-        for (Scheduler.Upcoming upcoming : scheduler.upcoming()) {
-            body.append("<tr><td><strong>").append(Html.escape(upcoming.jobId())).append("</strong>")
-                    .append(upcoming.running() ? " " + Html.badge(true, "running") : "")
-                    .append("</td><td class=\"mono\">").append(Html.escape(upcoming.cron()))
-                    .append(" <span class=\"muted\">").append(Html.escape(upcoming.timezone())).append("</span>")
-                    .append("</td><td>").append(Html.escape(format(upcoming.nextRun())))
-                    .append("</td><td>").append(Html.escape(upcoming.inText()))
-                    .append("</td><td><form method=\"post\" action=\"jobs/")
-                    .append(Html.escape(upcoming.jobId())).append("/run")
-                    .append(tokenQuery()).append("\"><button>Run now</button></form></td></tr>");
+    private List<RunRecord> recentRuns() {
+        return orchestrator.history().recent(RECENT_RUNS);
+    }
+
+    /**
+     * A counter that changes when the history does, so the browser can tell whether it needs to
+     * refetch the run list without downloading it every poll.
+     */
+    private long runsVersion() {
+        List<RunRecord> runs = recentRuns();
+        long newest = runs.isEmpty() ? 0L : runs.getFirst().startedAt().toEpochMilli();
+        return runs.size() * 31L + newest;
+    }
+
+    private Map<String, AccountStatus> accountStatuses() {
+        if (Duration.between(statusesFetchedAt, Instant.now()).compareTo(STATUS_CACHE_TTL) < 0) {
+            return cachedStatuses;
         }
-        body.append("</table>");
-
-        body.append("<h2>Accounts</h2><table><tr><th>Account</th><th>State</th><th>Username</th>")
-                .append("<th>Detail</th><th></th></tr>");
+        Map<String, AccountStatus> fresh = new LinkedHashMap<>();
         for (AccountConfig account : config.accountsOrEmpty()) {
-            AccountStatus status = accounts.status(account);
-            body.append("<tr><td><strong>").append(Html.escape(status.id())).append("</strong></td><td>")
-                    .append(Html.badge(status.isUsable(), status.state().toString()))
-                    .append("</td><td>").append(Html.escape(status.username() == null ? "-" : status.username()))
-                    .append("</td><td class=\"wrap muted\">").append(Html.escape(status.detail()))
-                    .append("</td><td>");
-            if (account.authOrDefault() == AccountConfig.AuthMode.MICROSOFT) {
-                body.append("<a href=\"accounts/").append(Html.escape(account.id())).append("/login")
-                        .append(tokenQuery()).append("\">Log in</a>");
-            }
-            body.append("</td></tr>");
+            fresh.put(account.id(), accounts.status(account));
         }
-        body.append("</table>");
+        cachedStatuses = Map.copyOf(fresh);
+        statusesFetchedAt = Instant.now();
+        return cachedStatuses;
+    }
 
-        body.append("<h2>Recent runs</h2>");
-        List<RunRecord> runs = orchestrator.history().recent(RECENT_RUNS);
-        if (runs.isEmpty()) {
-            body.append("<p class=\"muted\">Nothing has run yet.</p>");
-        } else {
-            body.append("<table><tr><th>When</th><th>Job</th><th>Trigger</th><th>Took</th>")
-                    .append("<th>Visits</th></tr>");
-            for (RunRecord run : runs) {
-                body.append("<tr><td>").append(Html.escape(run.startedAt()))
-                        .append("</td><td><strong>").append(Html.escape(run.jobId())).append("</strong>")
-                        .append("</td><td class=\"muted\">").append(Html.escape(run.trigger()))
-                        .append("</td><td>").append(Html.escape(Durations.format(run.duration())))
-                        .append("</td><td>");
-                for (RunRecord.VisitRecord visit : run.visits()) {
-                    body.append(Html.badge(visit.success(), visit.serverId()))
-                            .append(" <span class=\"muted\">")
-                            .append(Html.escape(visit.detail())).append("</span><br>");
-                }
-                body.append("</td></tr>");
-            }
-            body.append("</table>");
+    private void loginPage(HttpExchange exchange, String accountId) throws IOException {
+        Optional<AccountConfig> account = config.account(accountId);
+        if (account.isEmpty() || account.get().authOrDefault() != AccountConfig.AuthMode.MICROSOFT) {
+            respond(exchange, 404, "text/plain",
+                    "No such Microsoft account".getBytes(StandardCharsets.UTF_8), null);
+            return;
+        }
+        html(exchange, 200, LoginView.render(accountId, clientSummary, assets.version()));
+    }
+
+    // ------------------------------------------------------------------ api
+
+    private String stateJson() {
+        ObjectNode root = json.createObjectNode();
+        root.put("now", Instant.now().toString());
+        root.put("runsVersion", runsVersion());
+
+        Map<String, AccountStatus> statuses = accountStatuses();
+        root.put("accountsNeedingLogin",
+                statuses.values().stream().filter(status -> !status.isUsable()).count());
+
+        ArrayNode jobs = root.putArray("jobs");
+        for (Scheduler.Upcoming upcoming : scheduler.upcoming()) {
+            ObjectNode job = jobs.addObject();
+            job.put("id", upcoming.jobId());
+            job.put("running", upcoming.running());
+            job.put("nextRun", upcoming.nextRun() == null ? null : upcoming.nextRun().toInstant().toString());
         }
 
-        body.append("<h2>Client</h2><p class=\"muted\">Speaking Minecraft protocol ")
-                .append(orchestrator.protocols().hasTranslation()
-                        ? "with translation available for other versions."
-                        : "natively only — protocol translation is not installed.")
-                .append("</p>");
+        ArrayNode accountsNode = root.putArray("accounts");
+        statuses.forEach((id, status) -> {
+            ObjectNode account = accountsNode.addObject();
+            account.put("id", id);
+            account.put("state", status.state().toString());
+            account.put("usable", status.isUsable());
+            account.put("detail", status.detail());
+        });
 
-        return Html.page("chronit", body.toString());
+        return root.toString();
     }
 
     private void runJob(HttpExchange exchange, String jobId) throws IOException {
         Optional<JobConfig> job = config.job(jobId);
         if (job.isEmpty()) {
-            respond(exchange, 404, "text/plain", "No such job");
+            json(exchange, 404, "{\"ok\":false,\"message\":\"No such job\"}");
             return;
         }
-        // Runs on its own thread: a job takes minutes to hours, far beyond any request timeout.
+        if (orchestrator.isRunning(jobId)) {
+            json(exchange, 409, "{\"ok\":false,\"message\":\"" + jobId + " is already running\"}");
+            return;
+        }
+
+        // A job takes minutes to hours, far beyond any request timeout, so the response only
+        // confirms it started.
         Thread worker = new Thread(() -> {
             try {
                 orchestrator.runJob(job.get(), "web");
@@ -227,118 +343,173 @@ public final class WebInterface {
         worker.setDaemon(true);
         worker.start();
 
-        redirectToDashboard(exchange);
+        ObjectNode response = json.createObjectNode();
+        response.put("ok", true);
+        response.put("message", "Started " + jobId);
+        json(exchange, 202, response.toString());
     }
 
-    private void handleLogin(HttpExchange exchange, String accountId) throws IOException {
+    private void loginApi(HttpExchange exchange, String accountId, String method) throws IOException {
         Optional<AccountConfig> account = config.account(accountId);
         if (account.isEmpty() || account.get().authOrDefault() != AccountConfig.AuthMode.MICROSOFT) {
-            respond(exchange, 404, "text/plain", "No such Microsoft account");
+            json(exchange, 404, "{\"error\":\"No such Microsoft account\"}");
             return;
         }
-
-        if (exchange.getRequestMethod().equals("POST")) {
+        if (method.equals("POST")) {
             logins.start(account.get());
-            exchange.getResponseHeaders().add("Location", "../" + accountId + "/login" + tokenQuery());
-            respond(exchange, 303, "text/plain", "");
-            return;
+            // The status read is now stale by definition.
+            statusesFetchedAt = Instant.EPOCH;
         }
 
-        StringBuilder body = new StringBuilder();
-        Integer refresh = null;
-        body.append("<h2>Log in: ").append(Html.escape(accountId)).append("</h2>");
-
+        ObjectNode response = json.createObjectNode();
         Optional<LoginFlows.Flow> flow = logins.get(accountId);
         if (flow.isEmpty()) {
-            body.append("<p>Starting a login opens a Microsoft device authorisation. You will get a "
-                            + "short code to enter on another device.</p>")
-                    .append("<form method=\"post\" action=\"login").append(tokenQuery())
-                    .append("\"><button>Start login</button></form>");
+            response.put("state", "IDLE");
         } else {
             LoginFlows.Flow current = flow.get();
-            switch (current.state()) {
-                case STARTING -> {
-                    body.append("<p class=\"muted\">Requesting a code from Microsoft...</p>");
-                    refresh = 2;
-                }
-                case WAITING -> {
-                    body.append("<div class=\"card\"><p>Open <a href=\"")
-                            .append(Html.escape(current.prompt().verificationUri()))
-                            .append("\" target=\"_blank\" rel=\"noopener noreferrer\">")
-                            .append(Html.escape(current.prompt().verificationUri()))
-                            .append("</a> and enter:</p><div class=\"code\">")
-                            .append(Html.escape(current.prompt().userCode()))
-                            .append("</div><p class=\"muted\">Or open <a href=\"")
-                            .append(Html.escape(current.prompt().directVerificationUri()))
-                            .append("\" target=\"_blank\" rel=\"noopener noreferrer\">this link</a>, "
-                                    + "which already includes the code. Expires ")
-                            .append(Html.escape(current.prompt().expiresAt()))
-                            .append(".</p></div>");
-                    refresh = 3;
-                }
-                case DONE -> {
-                    body.append("<p>").append(Html.badge(true, "Logged in")).append("</p>");
-                    logins.clear(accountId);
-                }
-                case FAILED -> {
-                    body.append("<p>").append(Html.badge(false, "Failed")).append(" ")
-                            .append(Html.escape(current.message())).append("</p>")
-                            .append("<form method=\"post\" action=\"login").append(tokenQuery())
-                            .append("\"><button>Try again</button></form>");
-                    logins.clear(accountId);
-                }
+            response.put("state", current.state().toString());
+            response.put("message", current.message());
+            if (current.prompt() != null) {
+                response.put("userCode", current.prompt().userCode());
+                response.put("verificationUri", current.prompt().verificationUri());
+                response.put("directVerificationUri", current.prompt().directVerificationUri());
+                response.put("expiresAt", current.prompt().expiresAt().toString());
+            }
+            if (current.state() == LoginFlows.State.DONE || current.state() == LoginFlows.State.FAILED) {
+                logins.clear(accountId);
+                statusesFetchedAt = Instant.EPOCH;
             }
         }
-
-        body.append("<p><a href=\"../../\">Back</a></p>");
-        respond(exchange, 200, "text/html", Html.page("chronit — login", body.toString(), refresh));
+        json(exchange, 200, response.toString());
     }
 
-    // ------------------------------------------------------------------ helpers
+    // ------------------------------------------------------------------ assets
 
-    /** Carries the token through links and forms when one is configured. */
-    private String tokenQuery() {
-        return webConfig.token() != null && !webConfig.token().isBlank()
-                ? "?token=" + java.net.URLEncoder.encode(webConfig.token(), StandardCharsets.UTF_8)
-                : "";
+    private void serveAsset(HttpExchange exchange, String name) throws IOException {
+        Assets.Asset asset = assets.get(name);
+        if (asset == null) {
+            respond(exchange, 404, "text/plain", "Not found".getBytes(StandardCharsets.UTF_8), null);
+            return;
+        }
+        String requestETag = exchange.getRequestHeaders().getFirst("If-None-Match");
+        if (asset.etag().equals(requestETag)) {
+            exchange.getResponseHeaders().set("ETag", asset.etag());
+            exchange.sendResponseHeaders(304, -1);
+            return;
+        }
+        exchange.getResponseHeaders().set("ETag", asset.etag());
+        // Safe to cache hard because the URL carries a content hash.
+        exchange.getResponseHeaders().set("Cache-Control", "public, max-age=31536000, immutable");
+        respond(exchange, 200, asset.contentType(), asset.bytes(), null);
     }
 
-    private void redirectToDashboard(HttpExchange exchange) throws IOException {
-        exchange.getResponseHeaders().add("Location", "/" + tokenQuery());
-        respond(exchange, 303, "text/plain", "");
+    // ------------------------------------------------------------------ plumbing
+
+    private void html(HttpExchange exchange, int status, String body) throws IOException {
+        respond(exchange, status, "text/html", body.getBytes(StandardCharsets.UTF_8), "no-store");
     }
 
-    private static Optional<String> queryParam(HttpExchange exchange, String name) {
-        String query = exchange.getRequestURI().getQuery();
-        if (query == null) {
+    private void json(HttpExchange exchange, int status, String body) throws IOException {
+        respond(exchange, status, "application/json", body.getBytes(StandardCharsets.UTF_8), "no-store");
+    }
+
+    private void redirect(HttpExchange exchange, String location) throws IOException {
+        exchange.getResponseHeaders().set("Location", location);
+        exchange.sendResponseHeaders(303, -1);
+    }
+
+    private static void respond(HttpExchange exchange, int status, String contentType,
+                                byte[] body, String cacheControl) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", contentType + "; charset=utf-8");
+        if (cacheControl != null) {
+            exchange.getResponseHeaders().set("Cache-Control", cacheControl);
+        }
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
+        // Everything is served from this origin; nothing external is ever loaded.
+        exchange.getResponseHeaders().set("Content-Security-Policy",
+                "default-src 'none'; style-src 'self'; script-src 'self' 'unsafe-inline'; "
+                        + "img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'");
+
+        exchange.sendResponseHeaders(status, body.length == 0 ? -1 : body.length);
+        if (body.length > 0) {
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        }
+    }
+
+    private static Optional<String> cookie(HttpExchange exchange, String name) {
+        List<String> headers = exchange.getRequestHeaders().get("Cookie");
+        if (headers == null) {
             return Optional.empty();
         }
-        for (String pair : query.split("&")) {
-            int equals = pair.indexOf('=');
-            if (equals > 0 && pair.substring(0, equals).equals(name)) {
-                return Optional.of(java.net.URLDecoder.decode(pair.substring(equals + 1), StandardCharsets.UTF_8));
+        for (String header : headers) {
+            for (String pair : header.split(";")) {
+                String trimmed = pair.trim();
+                if (trimmed.startsWith(name + "=")) {
+                    return Optional.of(trimmed.substring(name.length() + 1));
+                }
             }
         }
         return Optional.empty();
     }
 
-    private static String format(java.time.ZonedDateTime time) {
-        return time == null ? "never" : time.toString();
+    private static Optional<String> formField(String body, String field) {
+        for (String pair : body.split("&")) {
+            int equals = pair.indexOf('=');
+            if (equals > 0 && pair.substring(0, equals).equals(field)) {
+                return Optional.of(URLDecoder.decode(pair.substring(equals + 1), StandardCharsets.UTF_8));
+            }
+        }
+        return Optional.empty();
     }
 
-    private static void respond(HttpExchange exchange, int status, String contentType, String body)
-            throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", contentType + "; charset=utf-8");
-        // The dashboard reflects live state; a cached copy would be actively misleading.
-        exchange.getResponseHeaders().set("Cache-Control", "no-store");
-        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        exchange.getResponseHeaders().set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
-        exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
-        if (bytes.length > 0) {
-            try (OutputStream out = exchange.getResponseBody()) {
-                out.write(bytes);
+    private static String decode(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
+    }
+
+    /** Static files read once from the jar, with a content hash for cache busting. */
+    private static final class Assets {
+
+        record Asset(byte[] bytes, String contentType, String etag) {
+        }
+
+        private final Map<String, Asset> files = new LinkedHashMap<>();
+        private final String version;
+
+        Assets() {
+            load("app.css", "text/css");
+            load("app.js", "text/javascript");
+            // One token derived from every asset, so a jar rebuild busts both caches at once.
+            String combined = files.values().stream()
+                    .map(Asset::etag)
+                    .reduce("", String::concat)
+                    .replaceAll("[^0-9a-f]", "");
+            this.version = combined.isEmpty() ? "dev" : combined.substring(0, Math.min(10, combined.length()));
+        }
+
+        private void load(String name, String contentType) {
+            try (InputStream in = Assets.class.getResourceAsStream("/assets/" + name)) {
+                if (in == null) {
+                    log.error("Bundled asset /assets/{} is missing; the interface will look broken", name);
+                    return;
+                }
+                byte[] bytes = in.readAllBytes();
+                String etag = "\"" + HexFormat.of().formatHex(
+                        MessageDigest.getInstance("SHA-256").digest(bytes)).substring(0, 16) + "\"";
+                files.put(name, new Asset(bytes, contentType, etag));
+            } catch (Exception e) {
+                log.error("Could not read bundled asset {}: {}", name, e.toString());
             }
+        }
+
+        Asset get(String name) {
+            return files.get(name);
+        }
+
+        String version() {
+            return version;
         }
     }
 }

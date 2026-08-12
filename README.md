@@ -296,9 +296,10 @@ rendered — including inside exception messages, which is where this sort of th
 
 ## Web interface
 
-Off by default. Enable it for a dashboard showing the schedule, account state, and recent runs, with
-a *Run now* button and a *Log in* button that walks through the device code flow in the browser —
-considerably nicer than catching a fifteen-minute code out of `docker logs -f` every ninety days.
+Off by default. Enable it for a dashboard showing the schedule, every job's full visit chain,
+account state and recent runs, with a *Run now* button and a *Sign in* flow that walks through the
+device code in the browser — considerably nicer than catching a fifteen-minute code out of
+`docker logs -f` every ninety days.
 
 ```yaml
 web:
@@ -308,9 +309,41 @@ web:
   token: ${CHRONIT_WEB_TOKEN}
 ```
 
-It is a handful of server-rendered pages on the JDK's own HTTP server — no framework, no JavaScript
-build step. `/healthz` is unauthenticated and reveals nothing; everything else requires the token
-when one is set.
+Each job card shows what the schedule will actually do: the cron in plain English, the next fire
+time, the overlap and misfire policies, and then every visit — server and address, account, how long
+it stays, resource pack mode, readiness conditions, retry policy, and each configured step in order
+with its waits. Command payloads go through the log redactor first, so a `login <password>` step
+shows as `/login ***`.
+
+### How it is built
+
+Server-rendered pages on the JDK's own HTTP server — no framework, no JavaScript build step, and it
+works with scripting disabled. Two decisions are worth knowing about:
+
+**Markup comes from a typed builder, not string concatenation.** Everything on these pages
+originates outside the process — server names, kick reasons, menu titles, chat — and with
+`StringBuilder` a single forgotten escape is an injection hole. In the builder the only way to put
+content into a node is `text()`, which escapes, so the mistake is not available to make. Tests fire
+`<img src=x onerror=…>` through a kick reason to keep it that way.
+
+**The page does not reload.** A ~400 byte JSON snapshot is polled every six seconds and patches the
+few values that change; polling stops entirely while the tab is hidden. Countdowns tick locally from
+embedded timestamps, so staying current costs no requests at all. When the history changes, the
+*server-rendered* run fragment is fetched and swapped in — so there is still only one description of
+what a run looks like. Actions go through `fetch` and answer with a toast rather than a blind
+redirect.
+
+The stylesheet and script are served as cacheable assets with a content-hashed URL and an ETag, so a
+poll never re-downloads them. Account status is cached briefly, because reading it parses a token
+file from disk and the dashboard asks often.
+
+### Access
+
+`/healthz` is unauthenticated and reveals nothing. Everything else needs the token when one is set,
+supplied either as `Authorization: Bearer …` for tooling, or through a small sign-in form for a
+browser, which exchanges it for an `HttpOnly; SameSite=Strict` cookie. A token is deliberately *not*
+accepted as a query parameter — that would put it in browser history, in referrer headers and in any
+access log in front of the process.
 
 ---
 

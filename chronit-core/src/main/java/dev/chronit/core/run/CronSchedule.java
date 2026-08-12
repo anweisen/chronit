@@ -24,12 +24,31 @@ public final class CronSchedule {
 
     private final String expression;
     private final ZoneId zone;
+    private final Cron cron;
     private final ExecutionTime executionTime;
 
-    private CronSchedule(String expression, ZoneId zone, ExecutionTime executionTime) {
+    private CronSchedule(String expression, ZoneId zone, Cron cron, ExecutionTime executionTime) {
         this.expression = expression;
         this.zone = zone;
+        this.cron = cron;
         this.executionTime = executionTime;
+    }
+
+    /**
+     * The expression in plain English, e.g. "at 20:00 every day".
+     *
+     * <p>Lives here rather than at the call site so the cron library stays an implementation detail
+     * of this module.
+     */
+    public String description() {
+        try {
+            return com.cronutils.descriptor.CronDescriptor.instance(java.util.Locale.ENGLISH)
+                    .describe(cron);
+        } catch (RuntimeException e) {
+            // Describing is decoration; a library that cannot phrase an otherwise valid expression
+            // must not take a page down.
+            return expression;
+        }
     }
 
     /**
@@ -43,7 +62,7 @@ public final class CronSchedule {
         try {
             Cron cron = new CronParser(CronDefinitionBuilder.instanceDefinitionFor(type)).parse(expression);
             cron.validate();
-            return new CronSchedule(expression, zone, ExecutionTime.forCron(cron));
+            return new CronSchedule(expression, zone, cron, ExecutionTime.forCron(cron));
         } catch (RuntimeException e) {
             throw new ConfigException("Invalid cron expression '" + expression + "': " + e.getMessage(), e);
         }
