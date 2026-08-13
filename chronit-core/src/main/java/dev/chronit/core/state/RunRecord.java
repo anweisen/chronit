@@ -25,7 +25,15 @@ public record RunRecord(
         return visits.stream().filter(VisitRecord::success).count();
     }
 
-    /** One server visit within a run. */
+    /**
+     * One server visit within a run.
+     *
+     * @param timeToReady how long the join took — connect, configuration, spawn. Null when the
+     *                    visit never got that far, which is itself the useful signal
+     * @param outcome     why it ended, as a {@code DisconnectInfo.Kind} name. Distinguishes a
+     *                    version rejection from a resource pack refusal from a plain timeout
+     *                    without anyone having to read the message
+     */
     public record VisitRecord(
             String serverId,
             String accountId,
@@ -36,6 +44,12 @@ public record RunRecord(
             int actionsRun,
             int attempts,
             int protocolVersion,
-            boolean translated) {
+            boolean translated,
+            Duration timeToReady,
+            String outcome) {
+
+        public boolean reachedTheWorld() {
+            return timeToReady != null;
+        }
     }
 }

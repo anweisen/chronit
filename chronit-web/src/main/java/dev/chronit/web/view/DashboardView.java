@@ -9,14 +9,15 @@ import dev.chronit.core.config.RetryConfig;
 import dev.chronit.core.config.ServerConfig;
 import dev.chronit.core.config.VisitConfig;
 import dev.chronit.core.driver.SessionSettings;
+import dev.chronit.core.run.CronSchedule;
 import dev.chronit.core.run.Scheduler;
 import dev.chronit.core.state.RunRecord;
 import dev.chronit.core.util.Durations;
 import dev.chronit.core.util.Redactor;
-import dev.chronit.web.html.Element;
 import dev.chronit.web.html.Node;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,9 +29,11 @@ import static dev.chronit.web.html.H.button;
 import static dev.chronit.web.html.H.cls;
 import static dev.chronit.web.html.H.code;
 import static dev.chronit.web.html.H.dd;
+import static dev.chronit.web.html.H.details;
 import static dev.chronit.web.html.H.div;
 import static dev.chronit.web.html.H.dl;
 import static dev.chronit.web.html.H.dt;
+import static dev.chronit.web.html.H.h1;
 import static dev.chronit.web.html.H.h2;
 import static dev.chronit.web.html.H.h3;
 import static dev.chronit.web.html.H.href;
@@ -39,6 +42,7 @@ import static dev.chronit.web.html.H.main;
 import static dev.chronit.web.html.H.p;
 import static dev.chronit.web.html.H.section;
 import static dev.chronit.web.html.H.span;
+import static dev.chronit.web.html.H.summary;
 import static dev.chronit.web.html.H.text;
 import static dev.chronit.web.html.H.time;
 import static dev.chronit.web.html.H.ul;
@@ -47,10 +51,13 @@ import static dev.chronit.web.html.H.urlSegment;
 /**
  * The dashboard.
  *
- * <p>Ordered by what an operator actually wants to know: is anything wrong, what is running, what
- * is coming, and what happened. The job cards deliberately show the whole visit chain — server,
- * account, how long it stays, the retry policy and every configured step — because that is the part
- * of the configuration you cannot check by looking at the running process.
+ * <p>Ordered by what an operator actually wants to know, in that order: is anything waiting on me,
+ * what is running, what is coming, what happened. The routine numbers read as one sentence rather
+ * than a row of tiles — four equally-sized boxes give a next-run time the same weight as an account
+ * that has stopped working, when only one of those needs a person.
+ *
+ * <p>Detail is present but folded away. A job's visit chain and the system information both sit
+ * behind a disclosure, so the page opens as a short summary and expands to the whole configuration.
  */
 public final class DashboardView {
 
@@ -74,8 +81,13 @@ public final class DashboardView {
             return runs.stream().filter(run -> run.jobId().equals(jobId)).findFirst();
         }
 
-        long accountsNeedingLogin() {
-            return accounts.values().stream().filter(status -> !status.isUsable()).count();
+        List<AccountConfig> accountsNeedingLogin() {
+            return config.accountsOrEmpty().stream()
+                    .filter(account -> {
+                        AccountStatus status = accounts.get(account.id());
+                        return status != null && !status.isUsable();
+                    })
+                    .toList();
         }
     }
 
@@ -84,49 +96,86 @@ public final class DashboardView {
                 List.of(attr("data-dashboard", "true"),
                         attr("data-runs-version", String.valueOf(model.runsVersion()))),
                 main(cls("page"),
-                        stats(model),
+                        hero(model),
+                        attention(model),
                         jobs(model),
                         accounts(model),
-                        runs(model)));
+                        runs(model),
+                        information(model)));
     }
 
-    // ---------------------------------------------------------------- stats
+    // ---------------------------------------------------------------- hero
 
-    private static Node stats(Model model) {
+    private static Node hero(Model model) {
         Optional<Scheduler.Upcoming> next = model.upcoming().stream()
                 .filter(u -> u.nextRun() != null)
                 .findFirst();
-
         long running = model.upcoming().stream().filter(Scheduler.Upcoming::running).count();
-        long needingLogin = model.accountsNeedingLogin();
-        Optional<RunRecord> lastRun = model.runs().stream().findFirst();
+        int jobCount = model.config().jobsOrEmpty().size();
 
-        // Rendered as a live timestamp so the headline figure agrees with the job card and stays
-        // true between polls instead of freezing at whatever it was when the page was built.
-        Element nextTile = next
-                .map(upcoming -> Ui.stat("Next run",
-                        Ui.relativeTime(upcoming.nextRun(), "in " + upcoming.inText()),
-                        upcoming.jobId(), Ui.Tone.NEUTRAL))
-                .orElseGet(() -> Ui.stat("Next run", "—", "nothing scheduled", Ui.Tone.NEUTRAL));
+        List<Node> status = new ArrayList<>();
+        if (running > 0) {
+            status.add(span(text(running == 1 ? "1 job running" : running + " jobs running")));
+        } else {
+            next.ifPresentOrElse(
+                    upcoming -> {
+                        status.add(span(text("Next run")));
+                        status.add(time(attr("datetime", upcoming.nextRun().toInstant().toString()),
+                                attr("data-relative", ""),
+                                attr("data-hero-next", ""),
+                                attr("title", upcoming.nextRun().toString()),
+                                text("in " + upcoming.inText())));
+                        status.add(span(cls("hero__sep"), text("·")));
+                        status.add(span(text(upcoming.jobId())));
+                    },
+                    () -> status.add(span(text("Nothing scheduled"))));
+        }
+        status.add(span(cls("hero__sep"), text("·")));
+        status.add(span(text(jobCount == 1 ? "1 job" : jobCount + " jobs")));
+        status.add(span(cls("hero__sep"), text("·")));
+        status.add(span(text(model.accounts().size() == 1
+                ? "1 account" : model.accounts().size() + " accounts")));
 
-        return section(cls("stats"),
-                nextTile,
-                Ui.stat("Jobs",
-                        String.valueOf(model.config().jobsOrEmpty().size()),
-                        running > 0 ? running + " running now" : "idle",
-                        running > 0 ? Ui.Tone.OK : Ui.Tone.NEUTRAL),
-                div(cls(needingLogin > 0 ? "stat stat--warn" : "stat"),
-                        p(cls("stat__label"), text("Accounts")),
-                        p(cls("stat__value"),
-                                span(attr("data-stat-attention", ""), text(String.valueOf(needingLogin))),
-                                text(needingLogin == 1 ? " needs login" : " need login")),
-                        p(cls("stat__sub"), text(model.accounts().size() + " configured"))),
-                lastRun
-                        .map(run -> Ui.stat("Last run",
-                                run.succeeded() ? "Succeeded" : "Failed",
-                                run.jobId() + " · " + Durations.format(run.duration()),
-                                run.succeeded() ? Ui.Tone.OK : Ui.Tone.BAD))
-                        .orElseGet(() -> Ui.stat("Last run", "—", "no history yet", Ui.Tone.NEUTRAL)));
+        // Emphasis lands on the time itself; everything around it is supporting text.
+        List<Node> emphasised = status.stream()
+                .map(node -> node)
+                .toList();
+
+        return section(cls("hero"),
+                h1(cls("hero__title"), text("Overview")),
+                p(cls("hero__status"), Node.fragment(emphasised.toArray(Node[]::new))));
+    }
+
+    /**
+     * The one thing that might need a person.
+     *
+     * <p>Rendered only when it applies, which is what earns it this much room: a permanent tile
+     * reading "0 need login" is noise, whereas an account whose refresh token has expired stops
+     * every scheduled run until someone signs in.
+     */
+    private static Node attention(Model model) {
+        List<AccountConfig> needing = model.accountsNeedingLogin();
+        if (needing.isEmpty()) {
+            return Node.empty();
+        }
+        AccountConfig first = needing.getFirst();
+        AccountStatus status = model.accounts().get(first.id());
+
+        String title = needing.size() == 1
+                ? "Account “" + first.id() + "” needs signing in"
+                : needing.size() + " accounts need signing in";
+
+        return div(cls("alert"), attr("role", "status"),
+                div(cls("alert__icon"), Ui.icon("warn")),
+                div(cls("alert__body"),
+                        p(cls("alert__title"), text(title)),
+                        p(cls("alert__detail"),
+                                text(status == null ? "" : status.detail()))),
+                first.authOrDefault() == AccountConfig.AuthMode.MICROSOFT
+                        ? a(cls("btn btn--primary"),
+                        href("accounts/" + urlSegment(first.id()) + "/login"),
+                        text("Sign in"))
+                        : Node.empty());
     }
 
     // ---------------------------------------------------------------- jobs
@@ -149,13 +198,8 @@ public final class DashboardView {
         Optional<Scheduler.Upcoming> upcoming = model.upcomingFor(job.id());
         boolean running = upcoming.map(Scheduler.Upcoming::running).orElse(false);
         Optional<RunRecord> lastRun = model.lastRunFor(job.id());
+        List<VisitConfig> visits = job.visits() == null ? List.of() : job.visits();
 
-        String classes = "job"
-                + (running ? " job--running" : "")
-                + (job.isEnabled() ? "" : " job--disabled");
-
-        // The running chip is always in the markup, hidden when idle, so the poll can reveal it
-        // without having to build an element client-side.
         Node runningChip = running
                 ? Ui.runningChip()
                 : span(attr("data-job-status", ""), attr("hidden", null), Ui.runningChip());
@@ -166,26 +210,23 @@ public final class DashboardView {
                 ? Ui.chip(Ui.Tone.OK, "last run ok")
                 : Ui.chip(Ui.Tone.BAD, "last run failed");
 
+        String classes = "job"
+                + (running ? " job--running" : "")
+                + (job.isEnabled() ? "" : " job--disabled");
+
         return article(cls(classes), attr("data-job", job.id()),
                 div(cls("job__head"),
                         div(
-                                h3(cls("job__title"),
-                                        text(job.id()),
-                                        runningChip,
-                                        disabledChip,
-                                        outcomeChip),
+                                h3(cls("job__title"), text(job.id()),
+                                        runningChip, disabledChip, outcomeChip),
                                 p(cls("job__schedule"),
                                         code(text(job.cron())),
-                                        span(cls("faint"), text("·")),
+                                        span(cls("hero__sep"), text("·")),
                                         span(text(describeCron(job))),
-                                        span(cls("faint"), text("·")),
-                                        span(cls("mono faint"), text(job.zoneOrDefault().getId())),
-                                        span(cls("faint"), text("·")),
-                                        span(cls("faint"),
-                                                text("overlap " + job.overlapOrDefault()
-                                                        + " · misfire " + job.misfireOrDefault())))),
+                                        span(cls("hero__sep"), text("·")),
+                                        span(cls("mono faint"), text(job.zoneOrDefault().getId())))),
                         div(cls("job__next"),
-                                span(text("Next")),
+                                span(cls("faint"), text("Next")),
                                 upcoming.<Node>map(DashboardView::nextRunTime)
                                         .orElseGet(() -> span(cls("faint"), text("—")))),
                         div(cls("job__actions"),
@@ -193,13 +234,36 @@ public final class DashboardView {
                                         attr("data-run-job", job.id()),
                                         Ui.icon("play"),
                                         text("Run now")))),
-                visits(model, job));
+                visitDisclosure(model, job, visits));
     }
 
     /**
-     * The next fire time, tagged so the script can retarget it after a run without a page reload,
-     * and rendered relative so it stays current between polls.
+     * The visit chain, folded away.
+     *
+     * <p>Open state is remembered per job, so someone watching a particular job does not have to
+     * re-open it after every poll that swaps content.
      */
+    private static Node visitDisclosure(Model model, JobConfig job, List<VisitConfig> visits) {
+        if (visits.isEmpty()) {
+            return Node.empty();
+        }
+        String servers = visits.stream().map(VisitConfig::server).distinct()
+                .reduce((a, b) -> a + ", " + b).orElse("");
+        String summaryText = (visits.size() == 1 ? "1 visit" : visits.size() + " visits")
+                + " · " + servers;
+
+        List<Node> rows = new ArrayList<>(visits.size());
+        for (int i = 0; i < visits.size(); i++) {
+            rows.add(visitRow(model, i + 1, visits.get(i)));
+        }
+
+        return details(cls("disclosure"), attr("data-remember", "job:" + job.id()),
+                summary(cls("disclosure__summary"),
+                        span(text(summaryText)),
+                        span(cls("disclosure__chevron"))),
+                ul(cls("visits"), Node.fragment(rows.toArray(Node[]::new))));
+    }
+
     private static Node nextRunTime(Scheduler.Upcoming upcoming) {
         if (upcoming.nextRun() == null) {
             return span(cls("faint"), text("never"));
@@ -213,22 +277,10 @@ public final class DashboardView {
 
     private static String describeCron(JobConfig job) {
         try {
-            return dev.chronit.core.run.CronSchedule.parse(job.cron(), job.zoneOrDefault()).description();
+            return CronSchedule.parse(job.cron(), job.zoneOrDefault()).description();
         } catch (RuntimeException e) {
             return "unparseable schedule";
         }
-    }
-
-    private static Node visits(Model model, JobConfig job) {
-        List<VisitConfig> visits = job.visits() == null ? List.of() : job.visits();
-        if (visits.isEmpty()) {
-            return Node.empty();
-        }
-        java.util.List<Node> rows = new java.util.ArrayList<>(visits.size());
-        for (int i = 0; i < visits.size(); i++) {
-            rows.add(visitRow(model, i + 1, visits.get(i)));
-        }
-        return ul(cls("visits"), Node.fragment(rows.toArray(Node[]::new)));
     }
 
     private static Node visitRow(Model model, int index, VisitConfig visit) {
@@ -253,7 +305,9 @@ public final class DashboardView {
                                         ? server.protocol() : "auto"),
                                 metaItem("Packs", settings != null
                                         ? String.valueOf(settings.resourcePack().mode()) : "—"),
-                                metaItem("Ready", settings != null ? readiness(settings) : "—"),
+                                metaItem("Ready when", settings != null ? readiness(settings) : "—"),
+                                metaItem("Secure chat", settings != null
+                                        ? String.valueOf(settings.secureChat()) : "—"),
                                 metaItem("Retries", (retry.retries() == null ? 0 : retry.retries())
                                         + " · then " + retry.then()),
                                 metaItem("Gap after", Durations.format(visit.gapAfterOrDefault()))),
@@ -288,7 +342,7 @@ public final class DashboardView {
             return Node.empty();
         }
         return div(
-                p(cls("steps__label"), attr("style", "margin-top:.7rem"), text(label)),
+                p(cls("steps__label"), text(label)),
                 ul(cls("steps"), Node.each(actions, DashboardView::step)));
     }
 
@@ -337,7 +391,7 @@ public final class DashboardView {
                 div(cls("panel__head"),
                         h2(cls("panel__title"), text("Accounts")),
                         span(cls("panel__note"),
-                                text("Microsoft sessions refresh automatically; a login is needed "
+                                text("Microsoft sessions refresh themselves; a sign-in is needed "
                                         + "about every 90 days"))),
                 accounts.isEmpty()
                         ? Ui.empty("No accounts configured.")
@@ -356,20 +410,22 @@ public final class DashboardView {
                         span(cls("chip " + (usable ? "chip--ok" : "chip--warn")),
                                 attr("data-account-state", ""),
                                 text(status == null ? "unknown" : status.state().toString()))),
-                p(cls("account__detail"),
+                p(cls("account__line"),
                         span(cls("mono"), text(status != null && status.username() != null
                                 ? status.username() : "—")),
                         text(" · "),
-                        span(attr("data-account-detail", ""),
-                                text(status == null ? "" : status.detail()))),
+                        span(text(microsoft ? "Microsoft" : "offline"))),
+                p(cls("account__line faint"), attr("data-account-detail", ""),
+                        text(status == null ? "" : status.detail())),
                 status != null && status.tokenExpiry() != null
-                        ? p(cls("account__detail faint"),
+                        ? p(cls("account__line faint"),
                         text("token expires "),
                         Ui.relativeTime(status.tokenExpiry(), status.tokenExpiry().toString()))
                         : Node.empty(),
                 microsoft
-                        ? a(cls("btn"), href("accounts/" + urlSegment(account.id()) + "/login"),
-                        text(usable ? "Re-authorise" : "Sign in"))
+                        ? div(cls("account__actions"),
+                        a(cls("btn"), href("accounts/" + urlSegment(account.id()) + "/login"),
+                                text(usable ? "Re-authorise" : "Sign in")))
                         : Node.empty());
     }
 
@@ -381,5 +437,32 @@ public final class DashboardView {
                         h2(cls("panel__title"), text("Recent runs")),
                         span(cls("panel__note"), text("newest first"))),
                 div(attr("data-runs", ""), Node.raw(RunsView.render(model.runs()))));
+    }
+
+    // ---------------------------------------------------------------- information
+
+    /** Reference detail: true but rarely urgent, so it starts folded. */
+    private static Node information(Model model) {
+        return section(cls("panel"),
+                details(cls("info"), attr("data-remember", "info"),
+                        summary(cls("disclosure__summary"),
+                                span(text("Information")),
+                                span(cls("disclosure__chevron"))),
+                        dl(cls("info__body"),
+                                infoItem("Client", model.clientSummary()),
+                                infoItem("Protocol translation", model.translationInstalled()
+                                        ? "installed — older servers reachable"
+                                        : "not installed — native protocol only"),
+                                infoItem("State directory", model.config().stateDirOrDefault().toString()),
+                                infoItem("Servers", String.valueOf(model.config().serversOrEmpty().size())),
+                                infoItem("Scheduler", model.config().jobsOrEmpty().stream()
+                                        .filter(JobConfig::isEnabled).count() + " enabled of "
+                                        + model.config().jobsOrEmpty().size()),
+                                infoItem("Resource pack cache",
+                                        model.config().stateDirOrDefault().resolve("packs").toString()))));
+    }
+
+    private static Node infoItem(String label, String value) {
+        return div(cls("info__item"), dt(text(label)), dd(text(value)));
     }
 }

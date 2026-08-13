@@ -77,6 +77,12 @@ public final class VisitRunner {
         // earlier session server-side, so overlapping visits would silently kick each other.
         try (AccountLocks.Lease ignored = locks.acquire(account.id())) {
             String failure = null;
+            // Kept from the final attempt so a failed visit can still say how far it got.
+            Duration lastTimeToReady = null;
+            DisconnectInfo.Kind lastKind = DisconnectInfo.Kind.UNKNOWN;
+            // How many attempts actually happened, which is not the configured maximum when a
+            // fatal failure stops the loop early.
+            int attemptsMade = 0;
             for (int attempt = 1; attempt <= attempts; attempt++) {
                 if (attempt > 1) {
                     Duration backoff = retry.backoffFor(attempt - 1);
@@ -85,19 +91,24 @@ public final class VisitRunner {
                     Thread.sleep(backoff.toMillis());
                 }
 
+                attemptsMade = attempt;
                 Attempt result = attemptVisit(visit, server, account, attempt);
                 if (result.success()) {
                     return new RunRecord.VisitRecord(server.id(), account.id(), startedAt,
                             Duration.between(startedAt, Instant.now()), true, result.detail(),
-                            result.actionsRun(), attempt, result.protocolVersion(), result.translated());
+                            result.actionsRun(), attempt, result.protocolVersion(), result.translated(),
+                            result.timeToReady(), result.kind().name());
                 }
                 failure = result.detail();
+                lastTimeToReady = result.timeToReady();
+                lastKind = result.kind();
                 if (result.fatal()) {
                     break;
                 }
             }
             return new RunRecord.VisitRecord(server.id(), account.id(), startedAt,
-                    Duration.between(startedAt, Instant.now()), false, failure, 0, attempts, -1, false);
+                    Duration.between(startedAt, Instant.now()), false, failure, 0, attemptsMade, -1,
+                    false, lastTimeToReady, lastKind.name());
         }
     }
 
@@ -106,15 +117,16 @@ public final class VisitRunner {
      *             the caller can recognise a version rejection without parsing a message.
      */
     private record Attempt(boolean success, boolean fatal, String detail, int actionsRun,
-                           int protocolVersion, boolean translated, DisconnectInfo.Kind kind) {
+                           int protocolVersion, boolean translated, DisconnectInfo.Kind kind,
+                           Duration timeToReady) {
 
         static Attempt failed(String detail, DisconnectInfo.Kind kind) {
-            return new Attempt(false, false, detail, 0, -1, false, kind);
+            return new Attempt(false, false, detail, 0, -1, false, kind, null);
         }
 
         /** A failure no retry can fix — bad credentials, unreachable version. */
-        static Attempt fatal(String detail) {
-            return new Attempt(false, true, detail, 0, -1, false, DisconnectInfo.Kind.UNKNOWN);
+        static Attempt fatal(String detail, DisconnectInfo.Kind kind) {
+            return new Attempt(false, true, detail, 0, -1, false, kind, null);
         }
 
         boolean rejectedOverVersion() {
@@ -130,7 +142,7 @@ public final class VisitRunner {
         } catch (AuthException e) {
             log.error("Cannot visit {}: {}", server.id(), e.getMessage());
             return e.needsLogin()
-                    ? Attempt.fatal(e.getMessage())
+                    ? Attempt.fatal(e.getMessage(), DisconnectInfo.Kind.AUTH_FAILED)
                     : Attempt.failed(e.getMessage(), DisconnectInfo.Kind.AUTH_FAILED);
         }
 
@@ -141,7 +153,8 @@ public final class VisitRunner {
         try {
             plan = protocols.plan(target);
         } catch (DriverException e) {
-            return Attempt.fatal(e.getMessage());
+            // No route to that protocol version, so nothing about retrying would differ.
+            return Attempt.fatal(e.getMessage(), DisconnectInfo.Kind.VERSION_MISMATCH);
         }
 
         Attempt result = connectAndRun(visit, server, target, auth, settings, plan);
@@ -181,7 +194,7 @@ public final class VisitRunner {
                     new ConnectRequest(target, auth, settings, plan.protocolVersion(), plan.translated()),
                     new Events(chat, screens, server.id(), disconnect));
         } catch (DriverException e) {
-            return Attempt.fatal(e.getMessage());
+            return Attempt.fatal(e.getMessage(), DisconnectInfo.Kind.NETWORK);
         }
 
         try {
@@ -194,7 +207,8 @@ public final class VisitRunner {
             if (!actions.isSuccess()) {
                 client.disconnect("Command sequence failed");
                 return new Attempt(false, false, actions.detail(), actions.executed(),
-                        ready.protocolVersion(), ready.translated(), DisconnectInfo.Kind.CLIENT_CLOSED);
+                        ready.protocolVersion(), ready.translated(), DisconnectInfo.Kind.CLIENT_CLOSED,
+                        ready.timeToReady());
             }
 
             lingerUntil(client, readyAt, visit.stayForOrDefault());
@@ -209,7 +223,7 @@ public final class VisitRunner {
             return new Attempt(true, false,
                     "ran " + actions.executed() + " action(s); " + plan.note(),
                     actions.executed(), ready.protocolVersion(), ready.translated(),
-                    DisconnectInfo.Kind.CLIENT_CLOSED);
+                    DisconnectInfo.Kind.CLIENT_CLOSED, ready.timeToReady());
         } catch (TimeoutException e) {
             client.disconnect("Timed out joining");
             return Attempt.failed(describeFailure(disconnect.get(), e.getMessage()),

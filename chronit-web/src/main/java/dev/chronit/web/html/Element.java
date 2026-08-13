@@ -15,14 +15,28 @@ public record Element(String tag, List<Attr> attributes, List<Node> children) im
     public static Element of(String tag, Node... nodes) {
         List<Attr> attributes = new ArrayList<>(4);
         List<Node> children = new ArrayList<>(nodes.length);
+        collect(nodes, attributes, children);
+        return new Element(tag, attributes, children);
+    }
+
+    /**
+     * Sorts attributes from content.
+     *
+     * <p>Fragments are looked inside, because a fragment is a transparent grouping — the caller
+     * meant "these nodes here". Without this, attributes assembled into a list and passed as one
+     * fragment land in the child list instead, and {@code Fragment.render} then prints them as
+     * visible text inside the element. That is not a hypothetical: it shipped, and put
+     * {@code data-login-account="main"} on screen.
+     */
+    private static void collect(Node[] nodes, List<Attr> attributes, List<Node> children) {
         for (Node node : nodes) {
-            if (node instanceof Attr attribute) {
-                attributes.add(attribute);
-            } else {
-                children.add(node);
+            switch (node) {
+                case Attr attribute -> attributes.add(attribute);
+                case Node.Fragment fragment ->
+                        collect(fragment.children().toArray(Node[]::new), attributes, children);
+                default -> children.add(node);
             }
         }
-        return new Element(tag, attributes, children);
     }
 
     @Override

@@ -72,6 +72,25 @@ class HtmlTest {
         assertEquals("<div></div>", div(Node.when(false, () -> span(text("no")))).toHtml());
     }
 
+    /**
+     * Regression: attributes gathered into a list and handed over as one fragment used to be
+     * classified as children, and rendered as visible text inside the element.
+     */
+    @Test
+    void attributesInsideAFragmentStillBecomeAttributes() {
+        Node grouped = Node.fragment(attr("data-dashboard", "true"), attr("data-runs", "7"));
+        String html = div(grouped, span(text("body"))).toHtml();
+
+        assertEquals("<div data-dashboard=\"true\" data-runs=\"7\"><span>body</span></div>", html);
+        assertFalse(html.contains(">data-dashboard"), "attributes must not leak into the text: " + html);
+    }
+
+    @Test
+    void nestedFragmentsAreFlattenedToo() {
+        Node inner = Node.fragment(attr("id", "x"), text("hi"));
+        assertEquals("<div id=\"x\">hi</div>", div(Node.fragment(inner)).toHtml());
+    }
+
     @Test
     void rawIsTheOnlyWayToEmitMarkupAndIsNotUsedForInput() {
         // Deliberate escape hatch, used only for the hand-written icons in this package.

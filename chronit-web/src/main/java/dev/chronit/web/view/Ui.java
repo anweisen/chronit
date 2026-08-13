@@ -51,32 +51,6 @@ public final class Ui {
                 text("running"));
     }
 
-    public static Element stat(String label, Node value, String sub, Tone tone) {
-        String modifier = switch (tone) {
-            case OK -> " stat--ok";
-            case WARN -> " stat--warn";
-            case BAD -> " stat--bad";
-            default -> "";
-        };
-        return div(cls("stat" + modifier),
-                p(cls("stat__label"), text(label)),
-                p(cls("stat__value"), value),
-                sub == null ? Node.empty() : p(cls("stat__sub"), text(sub)));
-    }
-
-    public static Element stat(String label, String value, String sub, Tone tone) {
-        String modifier = switch (tone) {
-            case OK -> " stat--ok";
-            case WARN -> " stat--warn";
-            case BAD -> " stat--bad";
-            default -> "";
-        };
-        return div(cls("stat" + modifier),
-                p(cls("stat__label"), text(label)),
-                p(cls("stat__value"), text(value)),
-                sub == null ? Node.empty() : p(cls("stat__sub"), text(sub)));
-    }
-
     /**
      * A timestamp the browser keeps current.
      *
@@ -106,7 +80,8 @@ public final class Ui {
         String path = switch (name) {
             case "theme" -> "<circle cx='12' cy='12' r='4.2'/><path d='M12 2.5v2M12 19.5v2M2.5 12h2"
                     + "M19.5 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19'/>";
-            case "play" -> "<path d='M8 5.5v13l11-6.5z'/>";
+            case "play" -> "<path d='M8 5.5v13l11-6.5z' fill='currentColor' stroke='none'/>";
+            case "warn" -> "<path d='M12 4.5 2.8 20h18.4z'/><path d='M12 10v4.2M12 17.2v.1'/>";
             default -> "";
         };
         return Node.raw("<svg viewBox='0 0 24 24' fill='none' stroke='currentColor'"

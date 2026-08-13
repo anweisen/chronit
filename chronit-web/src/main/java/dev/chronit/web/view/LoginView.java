@@ -38,15 +38,19 @@ public final class LoginView {
                 List.of(attr("data-login-account", accountId)),
                 main(cls("login"),
                         div(cls("login__card"),
-                                h1(cls("login__title"), text("Sign in as " + accountId)),
-                                p(cls("login__lead"),
-                                        text("Microsoft will show a short code to enter on any device "
-                                                + "with a browser. Nothing is typed here.")),
+                                p(cls("login__eyebrow"), text("Microsoft account")),
+                                h1(cls("login__title"), text(accountId)),
                                 div(attr("data-login-state", ""),
-                                        button(cls("btn btn--primary"), type("button"),
-                                                attr("data-start-login", ""),
+                                        p(cls("login__lead"),
+                                                text("Microsoft will show a short code to enter on any "
+                                                        + "device with a browser.")),
+                                        // The script replaces this as the flow progresses. It carries
+                                        // the account id because the handler is delegated, so the
+                                        // button keeps working however often this is re-rendered.
+                                        button(cls("btn btn--primary btn--lg"), type("button"),
+                                                attr("data-start-login", accountId),
                                                 text("Start sign-in")))),
-                        p(cls("login__lead"),
+                        p(cls("login__back"),
                                 a(href("../../"), text("Back to dashboard")))));
     }
 

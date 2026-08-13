@@ -310,10 +310,32 @@ web:
 ```
 
 Each job card shows what the schedule will actually do: the cron in plain English, the next fire
-time, the overlap and misfire policies, and then every visit — server and address, account, how long
-it stays, resource pack mode, readiness conditions, retry policy, and each configured step in order
-with its waits. Command payloads go through the log redactor first, so a `login <password>` step
-shows as `/login ***`.
+time, and then every visit — server and address, account, how long it stays, resource pack mode,
+readiness conditions, secure chat mode, retry policy, and each configured step in order with its
+waits. Command payloads go through the log redactor first, so a `login <password>` step shows as
+`/login ***`.
+
+Run history answers the questions actually asked after a failure, in order: did it get into the
+world at all and how long that took, how long it stayed, what it managed to run, how many attempts
+it took, which protocol it spoke, and what ended it — the outcome named (`version refused`,
+`resource pack`, `auth failed`) rather than left as a message to interpret.
+
+### Layout and type
+
+The page opens as a short summary and expands into the whole configuration. There is no row of
+dashboard tiles: four equal boxes give a next-run time the same weight as an account that has
+stopped working, when only one of those needs a person. Instead the routine facts read as one line
+of prose, and anything actually waiting on you appears as a banner with the button that fixes it —
+rendered only when it applies.
+
+Detail is present but folded. A job's visit chain and the system information sit behind
+disclosures, and which ones you left open is remembered, so watching one job does not mean
+re-opening it after every refresh.
+
+Typography follows Apple's conventions: San Francisco where it exists and the platform's own UI
+face otherwise, a small set of named text styles rather than ad-hoc sizes, tracking that tightens
+as type grows and opens up for small capitalised labels, and tabular figures anywhere a number
+changes in place — without them a ticking countdown shifts its own width every second.
 
 ### How it is built
 

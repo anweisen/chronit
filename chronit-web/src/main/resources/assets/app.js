@@ -85,6 +85,47 @@
     });
   }
 
+  /* ------------------------------------------------------------------ disclosures */
+
+  const OPEN_KEY = 'chronit-open';
+
+  function openSet() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]'));
+    } catch (error) {
+      return new Set();
+    }
+  }
+
+  /**
+   * Remembers which sections are expanded.
+   *
+   * Without this, anyone watching one job has to re-open it after every content swap, which is
+   * exactly the audience most likely to have it open in the first place.
+   */
+  function restoreDisclosures(root = document) {
+    const open = openSet();
+    root.querySelectorAll('details[data-remember]').forEach((element) => {
+      element.open = open.has(element.dataset.remember);
+    });
+  }
+
+  document.addEventListener('toggle', (event) => {
+    const element = event.target;
+    if (!(element instanceof HTMLDetailsElement) || !element.dataset.remember) return;
+    const open = openSet();
+    if (element.open) {
+      open.add(element.dataset.remember);
+    } else {
+      open.delete(element.dataset.remember);
+    }
+    try {
+      localStorage.setItem(OPEN_KEY, JSON.stringify([...open]));
+    } catch (error) {
+      /* Private browsing: remembering is a convenience, not a requirement. */
+    }
+  }, true);
+
   /* ------------------------------------------------------------------ toasts */
 
   function toast(message, kind = '') {
@@ -171,6 +212,7 @@
     const response = await fetch('fragments/runs', { credentials: 'same-origin' });
     if (!response.ok) return;
     host.innerHTML = await response.text();
+    restoreDisclosures(host);
     tickTimes(host);
   }
 
@@ -183,8 +225,13 @@
       applyJobState(state.jobs || []);
       applyAccountState(state.accounts || []);
 
-      const summary = document.querySelector('[data-stat-attention]');
-      if (summary) summary.textContent = state.accountsNeedingLogin;
+      const heroNext = document.querySelector('[data-hero-next]');
+      const soonest = (state.jobs || []).filter((j) => j.nextRun)
+        .sort((a, b) => Date.parse(a.nextRun) - Date.parse(b.nextRun))[0];
+      if (heroNext && soonest && heroNext.getAttribute('datetime') !== soonest.nextRun) {
+        heroNext.setAttribute('datetime', soonest.nextRun);
+        heroNext.textContent = relativeLabel(soonest.nextRun);
+      }
 
       if (state.runsVersion !== lastRunsVersion) {
         lastRunsVersion = state.runsVersion;
@@ -264,6 +311,23 @@
   function renderLogin(host, state, accountId) {
     host.innerHTML = '';
 
+    if (state.state === 'IDLE') {
+      // Nothing in progress. Offer to begin — this is the state a freshly opened page is in, and
+      // omitting it is what previously made the page announce a failure that had not happened.
+      const lead = document.createElement('p');
+      lead.className = 'login__lead';
+      lead.textContent = 'Microsoft will show a short code to enter on any device with a browser.';
+
+      const start = document.createElement('button');
+      start.className = 'btn btn--primary btn--lg';
+      start.type = 'button';
+      start.dataset.startLogin = accountId;
+      start.textContent = 'Start sign-in';
+
+      host.append(lead, start);
+      return;
+    }
+
     if (state.state === 'STARTING') {
       const spinner = document.createElement('div');
       spinner.className = 'spinner';
@@ -277,27 +341,24 @@
     if (state.state === 'WAITING') {
       const lead = document.createElement('p');
       lead.className = 'login__lead';
-      lead.textContent = 'Open the link below and enter this code.';
+      lead.textContent = 'Enter this code on the Microsoft sign-in page.';
 
       const code = document.createElement('div');
       code.className = 'code';
       code.textContent = state.userCode;
 
       const actions = document.createElement('div');
-      actions.style.display = 'flex';
-      actions.style.gap = '0.5rem';
-      actions.style.justifyContent = 'center';
-      actions.style.flexWrap = 'wrap';
+      actions.className = 'login__actions';
 
       const open = document.createElement('a');
-      open.className = 'btn btn--primary';
+      open.className = 'btn btn--primary btn--lg';
       open.href = state.directVerificationUri || state.verificationUri;
       open.target = '_blank';
       open.rel = 'noopener noreferrer';
       open.textContent = 'Open Microsoft sign-in';
 
       const copy = document.createElement('button');
-      copy.className = 'btn';
+      copy.className = 'btn btn--lg';
       copy.type = 'button';
       copy.dataset.copy = state.userCode;
       copy.textContent = 'Copy code';
@@ -305,7 +366,7 @@
       actions.append(open, copy);
 
       const note = document.createElement('p');
-      note.className = 'login__lead faint';
+      note.className = 'login__note';
       note.textContent = 'Waiting for you to finish. The code expires '
         + relativeLabel(state.expiresAt) + '.';
 
@@ -313,25 +374,36 @@
       return;
     }
 
-    const result = document.createElement('p');
-    result.className = 'login__lead';
     if (state.state === 'DONE') {
-      result.textContent = 'Signed in. ' + (state.message || '');
+      const done = document.createElement('p');
+      done.className = 'login__lead';
+      done.textContent = 'Signed in.' + (state.message ? ' ' + state.message : '');
       const back = document.createElement('a');
-      back.className = 'btn btn--primary';
+      back.className = 'btn btn--primary btn--lg';
       back.href = '../../';
       back.textContent = 'Back to dashboard';
-      host.append(result, back);
-    } else {
-      result.textContent = state.message || 'Sign-in failed.';
-      const retry = document.createElement('button');
-      retry.className = 'btn';
-      retry.type = 'button';
-      retry.textContent = 'Try again';
-      retry.addEventListener('click', () => startLogin(accountId));
-      host.append(result, retry);
+      host.append(done, back);
+      return;
     }
+
+    const failed = document.createElement('p');
+    failed.className = 'login__lead';
+    failed.textContent = state.message || 'Sign-in failed.';
+    const retry = document.createElement('button');
+    retry.className = 'btn btn--lg';
+    retry.type = 'button';
+    retry.dataset.startLogin = accountId;
+    retry.textContent = 'Try again';
+    host.append(failed, retry);
   }
+
+  document.addEventListener('click', (event) => {
+    const start = event.target.closest('[data-start-login]');
+    if (start) {
+      event.preventDefault();
+      startLogin(start.dataset.startLogin);
+    }
+  });
 
   async function startLogin(accountId) {
     const host = document.querySelector('[data-login-state]');
@@ -347,12 +419,12 @@
   /* ------------------------------------------------------------------ start */
 
   applyTheme(localStorage.getItem(THEME_KEY));
+  restoreDisclosures();
   tickTimes();
   setInterval(tickTimes, TICK_INTERVAL_MS);
 
   const loginAccount = document.body.dataset.loginAccount;
   if (loginAccount) {
-    document.querySelector('[data-start-login]')?.addEventListener('click', () => startLogin(loginAccount));
     pollLogin(loginAccount);
   }
 

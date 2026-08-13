@@ -25,7 +25,7 @@ class ViewTest {
                 Instant.parse("2026-08-12T18:00:00Z"), Instant.parse("2026-08-12T18:05:00Z"),
                 List.of(new RunRecord.VisitRecord("survival", "main",
                         Instant.parse("2026-08-12T18:00:01Z"), Duration.ofMinutes(5),
-                        false, detail, 0, 1, 776, false)));
+                        false, detail, 0, 1, 776, false, null, "KICKED")));
     }
 
     /**
@@ -47,10 +47,29 @@ class ViewTest {
                 Instant.parse("2026-08-12T18:00:00Z"), Instant.parse("2026-08-12T18:05:00Z"),
                 List.of(new RunRecord.VisitRecord("</span><script>x</script>", "main",
                         Instant.parse("2026-08-12T18:00:01Z"), Duration.ofMinutes(5),
-                        true, "ok", 1, 1, 776, false)));
+                        true, "ok", 1, 1, 776, false, Duration.ofSeconds(3), "CLIENT_CLOSED")));
 
         String html = RunsView.render(List.of(record));
         assertFalse(html.contains("<script>x</script>"), html);
+    }
+
+    /** A visit that never got in must say so rather than reporting a meaningless "present" time. */
+    @Test
+    void distinguishesNeverJoinedFromJoinedAndLeft() {
+        String neverJoined = RunsView.render(List.of(runWith("Connection refused")));
+        assertTrue(neverJoined.contains("never"), neverJoined);
+        assertTrue(neverJoined.contains("Gave up after"), neverJoined);
+
+        RunRecord joined = new RunRecord("r2", "nightly", "schedule",
+                Instant.parse("2026-08-12T18:00:00Z"), Instant.parse("2026-08-12T18:05:00Z"),
+                List.of(new RunRecord.VisitRecord("survival", "main",
+                        Instant.parse("2026-08-12T18:00:01Z"), Duration.ofMinutes(5),
+                        true, "ran 3 action(s)", 3, 1, 776, false,
+                        Duration.ofMillis(3200), "CLIENT_CLOSED")));
+        String html = RunsView.render(List.of(joined));
+        assertTrue(html.contains("Present"), html);
+        assertTrue(html.contains("3s") || html.contains("3200ms"), html);
+        assertTrue(html.contains("left cleanly"), "the outcome should read as prose: " + html);
     }
 
     @Test
