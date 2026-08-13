@@ -10,8 +10,10 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.GeneralSecurityException;
@@ -58,29 +60,51 @@ public final class TokenStore {
         return key != null;
     }
 
+    /**
+     * Reads a stored session.
+     *
+     * @return empty when there is no file yet
+     * @throws TokenStoreException when a file exists but cannot be understood. This is deliberately
+     *                             not treated as "no session": that would report a wrong
+     *                             {@code CHRONIT_SECRET_KEY} as an ordinary missing login, and the
+     *                             login that followed would overwrite a session that was fine all
+     *                             along
+     */
     public Optional<JsonObject> read(Path file) {
-        if (!Files.isReadable(file)) {
+        if (!Files.exists(file)) {
             return Optional.empty();
         }
+        String text;
         try {
-            String text = Files.readString(file, StandardCharsets.UTF_8);
-            JsonObject json = JsonParser.parseString(text).getAsJsonObject();
-
-            if (!json.has("chronitEncrypted")) {
-                if (key != null) {
-                    log.info("Token file {} is not encrypted; it will be encrypted on next write", file);
-                }
-                return Optional.of(json);
-            }
-            if (key == null) {
-                throw new IllegalStateException("Token file " + file + " is encrypted but "
-                        + ENV_KEY + " is not set");
-            }
-            return Optional.of(decrypt(json));
-        } catch (IOException | RuntimeException e) {
-            log.warn("Could not read token file {}: {}", file, e.toString());
+            text = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new TokenStoreException("Could not read the token file " + file + ": " + e.getMessage(), e);
+        }
+        if (text.isBlank()) {
+            // A zero-length file is what a disk full at exactly the wrong moment leaves behind.
+            // There is nothing to lose by treating it as absent.
+            log.warn("Token file {} is empty; treating it as no stored session", file);
             return Optional.empty();
         }
+
+        JsonObject json;
+        try {
+            json = JsonParser.parseString(text).getAsJsonObject();
+        } catch (RuntimeException e) {
+            throw new TokenStoreException("Token file " + file + " is not valid JSON", e);
+        }
+
+        if (!json.has("chronitEncrypted")) {
+            if (key != null) {
+                log.info("Token file {} is not encrypted; it will be encrypted on next write", file);
+            }
+            return Optional.of(json);
+        }
+        if (key == null) {
+            throw new TokenStoreException("Token file " + file + " is encrypted but "
+                    + ENV_KEY + " is not set");
+        }
+        return Optional.of(decrypt(json));
     }
 
     public void write(Path file, JsonObject json) throws IOException {
@@ -97,10 +121,27 @@ public final class TokenStore {
         try {
             restrictPermissions(temp);
             Files.writeString(temp, text, StandardCharsets.UTF_8);
-            Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            replace(temp, file);
             restrictPermissions(file);
         } finally {
             Files.deleteIfExists(temp);
+        }
+    }
+
+    /**
+     * Moves the temporary file over the real one, atomically where the platform allows it.
+     *
+     * <p>Worth asking for: a reader that catches the file mid-replacement gets a session it cannot
+     * parse, and the whole point of writing through a temporary file is that this cannot happen.
+     * Windows refuses an atomic move onto an existing file, so a plain replace is the fallback.
+     */
+    private static void replace(Path temp, Path file) throws IOException {
+        try {
+            Files.move(temp, file,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException | UnsupportedOperationException e) {
+            Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
@@ -135,6 +176,9 @@ public final class TokenStore {
     }
 
     private JsonObject decrypt(JsonObject wrapper) {
+        if (!wrapper.has("iv") || !wrapper.has("data")) {
+            throw new TokenStoreException("Encrypted token file is missing its iv or data field");
+        }
         try {
             byte[] iv = Base64.getDecoder().decode(wrapper.get("iv").getAsString());
             byte[] data = Base64.getDecoder().decode(wrapper.get("data").getAsString());
@@ -144,8 +188,8 @@ public final class TokenStore {
                     new GCMParameterSpec(GCM_TAG_BITS, iv));
             String plain = new String(cipher.doFinal(data), StandardCharsets.UTF_8);
             return JsonParser.parseString(plain).getAsJsonObject();
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException(
+        } catch (GeneralSecurityException | RuntimeException e) {
+            throw new TokenStoreException(
                     "Could not decrypt the token file — is " + ENV_KEY + " the same value it was written with?", e);
         }
     }

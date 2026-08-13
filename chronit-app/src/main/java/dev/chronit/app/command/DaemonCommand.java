@@ -2,6 +2,7 @@ package dev.chronit.app.command;
 
 import dev.chronit.core.auth.AccountManager;
 import dev.chronit.core.auth.AccountStatus;
+import dev.chronit.core.auth.TokenRefresher;
 import dev.chronit.core.config.ChronitConfig;
 import dev.chronit.core.config.WebConfig;
 import dev.chronit.core.run.Orchestrator;
@@ -35,6 +36,7 @@ public final class DaemonCommand implements Callable<Integer> {
         AccountManager accounts = new AccountManager(config);
         Orchestrator orchestrator = new Orchestrator(config, driver, accounts);
         Scheduler scheduler = new Scheduler(config, orchestrator);
+        TokenRefresher tokens = new TokenRefresher(config, accounts, orchestrator.locks()::isBusy);
 
         log.info("chronit starting — Minecraft {} (protocol {}), {} account(s), {} server(s), {} job(s)",
                 McplDriver.NATIVE_VERSION, McplDriver.NATIVE_PROTOCOL,
@@ -54,6 +56,9 @@ public final class DaemonCommand implements Callable<Integer> {
                     + "start logins from a browser.");
         }
 
+        // Started before the scheduler so a session that went stale while the process was down is
+        // renewed as the daemon comes up, rather than during the first visit that needs it.
+        tokens.start();
         scheduler.start();
 
         CountDownLatch stopped = new CountDownLatch(1);
@@ -63,6 +68,7 @@ public final class DaemonCommand implements Callable<Integer> {
             if (finalWeb != null) {
                 finalWeb.stop();
             }
+            tokens.close();
             // Closing the scheduler waits for a visit in progress, so the client leaves cleanly
             // rather than having the connection dropped underneath it.
             scheduler.close();
@@ -77,8 +83,9 @@ public final class DaemonCommand implements Callable<Integer> {
     /**
      * Says so at startup when an account will fail later.
      *
-     * <p>A Microsoft refresh token lasts about ninety days, so this eventually happens to every
-     * deployment. Finding out at startup beats finding out from a failed run at 3am.
+     * <p>This reads what is already on disk rather than contacting Microsoft, so it is instant; the
+     * refresher's first sweep follows a moment later and gives the authoritative answer. Finding
+     * out at startup beats finding out from a failed run at 3am.
      */
     private void warnAboutAccountsNeedingLogin(ChronitConfig config, AccountManager accounts) {
         for (var account : config.accountsOrEmpty()) {

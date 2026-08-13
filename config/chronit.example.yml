@@ -13,6 +13,29 @@ secretsFile: /data/secrets.yml
 
 
 # ---------------------------------------------------------------------------------------------
+# How stored Microsoft sessions are kept alive. The defaults are shown; the whole block is
+# optional.
+#
+# A Microsoft refresh token lasts 90 days but replaces itself every time it is used, so the 90
+# days is a limit on being left alone rather than a countdown to an unavoidable login. Sweeping
+# every few hours means it is never approached.
+# ---------------------------------------------------------------------------------------------
+auth:
+  # Refresh every Microsoft account as the daemon starts, so a session that went stale while the
+  # process was down is found immediately rather than by the first scheduled run.
+  refreshOnStart: true
+
+  # How often to sweep. 0 turns the sweep off and leaves refreshing to happen on the critical
+  # path of a visit — which still works, but an account left unused for 90 days will need a
+  # login.
+  refreshInterval: 6h
+
+  # Treat a token as due this long before it actually expires. A token with a minute left on it
+  # is no use: the server revalidates it against Mojang during the join.
+  refreshMargin: 30m
+
+
+# ---------------------------------------------------------------------------------------------
 # Settings applied to every server unless the server overrides them.
 # ---------------------------------------------------------------------------------------------
 defaults:
@@ -76,10 +99,12 @@ defaults:
 accounts:
   - id: main
     auth: MICROSOFT
-    # Run `chronit login main` once. The session is refreshed automatically afterwards and needs
-    # renewing roughly every 90 days.
+    # Run `chronit login main` once. The daemon refreshes the session in the background from then
+    # on, and each refresh restarts the 90-day window — so a second login is only needed if the
+    # daemon is off for three months, the password changes, or access is revoked.
     tokenStore: /data/tokens/main.json
-    # Optional: your own Azure application (client) ID with public client flows enabled.
+    # Optional: your own Azure application (client) ID with public client flows enabled. Changing
+    # this after logging in invalidates the stored session; run `chronit login main` again.
     # clientId: ${AZURE_CLIENT_ID}
 
   # Offline accounts need no login and only work against servers with online-mode=false —

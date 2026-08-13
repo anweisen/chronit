@@ -167,9 +167,12 @@ public final class VisitRunner {
             auth = accounts.resolve(account);
         } catch (AuthException e) {
             log.error("Cannot visit {}: {}", server.id(), e.getMessage());
-            return e.needsLogin()
-                    ? Attempt.fatal(e.getMessage(), DisconnectInfo.Kind.AUTH_FAILED)
-                    : Attempt.failed(e.getMessage(), DisconnectInfo.Kind.AUTH_FAILED);
+            // Only a Microsoft outage is worth another attempt. A session that can no longer be
+            // renewed will fail identically however many times it is asked, and the backoff between
+            // attempts is time the rest of the job could have used.
+            return e.isRetryable()
+                    ? Attempt.failed(e.getMessage(), DisconnectInfo.Kind.AUTH_FAILED)
+                    : Attempt.fatal(e.getMessage(), DisconnectInfo.Kind.AUTH_FAILED);
         }
 
         SessionSettings settings = SessionSettings.resolve(config, server);

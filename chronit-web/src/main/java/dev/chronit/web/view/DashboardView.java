@@ -407,8 +407,8 @@ public final class DashboardView {
                 div(cls("panel__head"),
                         h2(cls("panel__title"), text("Accounts")),
                         span(cls("panel__note"),
-                                text("Microsoft sessions refresh themselves; a sign-in is needed "
-                                        + "about every 90 days"))),
+                                text("Microsoft sessions refresh themselves in the background; a "
+                                        + "sign-in is only needed after 90 days with the daemon off"))),
                 accounts.isEmpty()
                         ? Ui.empty("No accounts configured.")
                         : div(cls("accounts"), Node.each(accounts, account -> accountCard(model, account))));
@@ -433,6 +433,13 @@ public final class DashboardView {
                         status != null && status.tokenExpiry() != null
                                 ? Ui.datum("Token expires",
                                 Ui.relativeTime(status.tokenExpiry(), status.tokenExpiry().toString()))
+                                : Node.empty(),
+                        // The one that decides whether anyone has to sit down at a browser. Every
+                        // background refresh pushes it back out to ninety days, so on a running
+                        // daemon it should never be seen to fall.
+                        status != null && status.sessionExpiry() != null
+                                ? Ui.datum("Sign-in due",
+                                Ui.relativeTime(status.sessionExpiry(), status.sessionExpiry().toString()))
                                 : Node.empty()),
                 p(cls("account__note"), attr("data-account-detail", ""),
                         text(status == null ? "" : status.detail())),

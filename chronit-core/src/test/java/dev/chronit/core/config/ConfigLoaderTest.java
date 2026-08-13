@@ -322,6 +322,51 @@ class ConfigLoaderTest {
     }
 
     @Test
+    void readsTheTokenRefreshSettings() {
+        ChronitConfig config = new ConfigLoader(Map.of()).loadString(MINIMAL + """
+                auth:
+                  refreshOnStart: false
+                  refreshInterval: 2h
+                  refreshMargin: 45m
+                """);
+
+        AuthConfig auth = config.authOrDefaults();
+        assertFalse(auth.refreshOnStartOrDefault());
+        assertEquals(Duration.ofHours(2), auth.refreshIntervalOrDefault());
+        assertEquals(Duration.ofHours(2).plusMinutes(45), auth.sweepHorizon());
+        assertTrue(auth.isBackgroundRefreshEnabled());
+    }
+
+    @Test
+    void refreshesOnASensibleScheduleWhenNothingIsConfigured() {
+        AuthConfig auth = new ConfigLoader(Map.of()).loadString(MINIMAL).authOrDefaults();
+
+        assertTrue(auth.refreshOnStartOrDefault());
+        assertEquals(Duration.ofHours(6), auth.refreshIntervalOrDefault());
+        assertTrue(auth.isBackgroundRefreshEnabled());
+    }
+
+    @Test
+    void treatsAZeroRefreshIntervalAsTurningTheSweepOff() {
+        AuthConfig auth = new ConfigLoader(Map.of()).loadString(MINIMAL + """
+                auth:
+                  refreshInterval: 0
+                """).authOrDefaults();
+
+        assertFalse(auth.isBackgroundRefreshEnabled());
+    }
+
+    @Test
+    void rejectsARefreshIntervalTooShortToBeWorthIt() {
+        ConfigException error = assertThrows(ConfigException.class,
+                () -> new ConfigLoader(Map.of()).loadString(MINIMAL + """
+                        auth:
+                          refreshInterval: 30s
+                        """));
+        assertTrue(error.getMessage().contains("auth.refreshInterval"), error.getMessage());
+    }
+
+    @Test
     void requiresTokenWhenWebIsNotLoopback() {
         ConfigException error = assertThrows(ConfigException.class,
                 () -> new ConfigLoader(Map.of()).loadString(MINIMAL + """

@@ -336,6 +336,8 @@ public final class WebInterface {
             account.put("state", status.state().toString());
             account.put("usable", status.isUsable());
             account.put("detail", status.detail());
+            account.put("sessionExpiry",
+                    status.sessionExpiry() == null ? null : status.sessionExpiry().toString());
         });
 
         return root.toString();

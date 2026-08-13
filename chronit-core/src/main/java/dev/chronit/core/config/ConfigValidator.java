@@ -3,6 +3,7 @@ package dev.chronit.core.config;
 import com.cronutils.model.CronType;
 import com.cronutils.model.definition.CronDefinitionBuilder;
 import com.cronutils.parser.CronParser;
+import dev.chronit.core.util.Durations;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -36,6 +37,7 @@ public final class ConfigValidator {
         validateServers(config, problems);
         validateJobs(config, problems);
         validateDefaults(config, problems);
+        validateAuth(config, problems);
         validateWeb(config, problems);
 
         if (config.accountsOrEmpty().isEmpty()) {
@@ -290,6 +292,29 @@ public final class ConfigValidator {
         requireNonNegative(ready.timeout(), path + ".timeout", problems);
         if (ready.timeout() != null && ready.timeout().isZero()) {
             problems.add(path + ".timeout: must be greater than zero");
+        }
+    }
+
+    private static void validateAuth(ChronitConfig config, List<String> problems) {
+        AuthConfig auth = config.auth();
+        if (auth == null) {
+            return;
+        }
+        requireNonNegative(auth.refreshInterval(), "auth.refreshInterval", problems);
+        requireNonNegative(auth.refreshMargin(), "auth.refreshMargin", problems);
+
+        // Sweeping more often than the shortest token lives is pointless load on Microsoft; the
+        // Minecraft token lasts a day and the underlying access token an hour.
+        if (auth.refreshInterval() != null && !auth.refreshInterval().isZero()
+                && auth.refreshInterval().compareTo(Duration.ofMinutes(5)) < 0) {
+            problems.add("auth.refreshInterval: " + Durations.format(auth.refreshInterval())
+                    + " is too frequent — use at least 5m, or 0 to refresh only when a visit needs it");
+        }
+        if (auth.refreshMargin() != null
+                && auth.refreshMargin().compareTo(Duration.ofHours(12)) > 0) {
+            problems.add("auth.refreshMargin: " + Durations.format(auth.refreshMargin())
+                    + " is longer than the Microsoft access token lives, so every check would "
+                    + "refresh — use something under 12h");
         }
     }
 

@@ -16,6 +16,7 @@ public record ChronitConfig(
         Path stateDir,
         Path secretsFile,
         DefaultsConfig defaults,
+        AuthConfig auth,
         List<AccountConfig> accounts,
         List<ServerConfig> servers,
         List<JobConfig> jobs,
@@ -25,6 +26,10 @@ public record ChronitConfig(
 
     public Path stateDirOrDefault() {
         return stateDir != null ? stateDir : DEFAULT_STATE_DIR;
+    }
+
+    public AuthConfig authOrDefaults() {
+        return auth != null ? auth : AuthConfig.DEFAULTS;
     }
 
     /** Defaults with anything unset filled in from {@link DefaultsConfig#DEFAULTS}. */
