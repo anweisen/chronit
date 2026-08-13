@@ -33,7 +33,7 @@ dependencies {
 }
 
 application {
-    mainClass = "dev.chronit.app.Chronit"
+    mainClass = "net.anweisen.chronit.app.Chronit"
 }
 
 tasks.jar {
@@ -75,7 +75,7 @@ tasks.shadowJar {
 
     manifest {
         attributes(
-            "Main-Class" to "dev.chronit.app.Chronit",
+            "Main-Class" to "net.anweisen.chronit.app.Chronit",
             "Implementation-Title" to "chronit",
             "Implementation-Version" to project.version,
             "Chronit-Via-Bundled" to withVia.toString(),

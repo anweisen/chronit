@@ -16,7 +16,7 @@ plugins {
     `java-library`
 }
 
-group = "dev.chronit"
+group = "net.anweisen.chronit"
 version = "1.0.0-SNAPSHOT"
 
 tasks.withType<JavaCompile>().configureEach {

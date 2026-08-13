@@ -5,7 +5,7 @@
     </encoder>
   </appender>
 
-  <logger name="dev.chronit" level="DEBUG"/>
+  <logger name="net.anweisen.chronit" level="DEBUG"/>
   <logger name="org.geysermc" level="DEBUG"/>
 
   <root level="INFO">
