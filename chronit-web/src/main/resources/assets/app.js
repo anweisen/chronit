@@ -80,7 +80,12 @@
 
   function tickTimes(root = document) {
     root.querySelectorAll('time[data-relative]').forEach((element) => {
-      const label = relativeLabel(element.getAttribute('datetime'));
+      // An elapsed clock reads "20s", not "20s ago": the label beside it already says
+      // "Running for", and the suffix would be reading the same word twice.
+      const elapsed = element.hasAttribute('data-elapsed');
+      const label = elapsed
+        ? humanDuration((Date.now() - Date.parse(element.getAttribute('datetime'))) / 1000)
+        : relativeLabel(element.getAttribute('datetime'));
       if (label && element.textContent !== label) element.textContent = label;
     });
   }
@@ -175,10 +180,26 @@
       card.classList.toggle('job--running', job.running);
 
       const badge = card.querySelector('[data-job-status]');
-      if (badge) {
-        badge.hidden = !job.running;
+      if (badge) badge.hidden = !job.running;
+
+      // Run and Cancel are the same slot: whichever applies is the one shown.
+      const run = card.querySelector('[data-when="idle"]');
+      const cancel = card.querySelector('[data-when="running"]');
+      if (run) run.hidden = job.running;
+      if (cancel) {
+        cancel.hidden = !job.running;
+        cancel.disabled = !!job.cancelling;
+        const label = cancel.querySelector('span');
+        if (label) label.textContent = job.cancelling ? 'Stopping…' : 'Cancel';
       }
 
+      // While running, the datum counts up from the start; otherwise it counts down to the next
+      // fire time. Retarget whichever one is in the DOM.
+      const elapsed = card.querySelector('[data-job-elapsed]');
+      if (elapsed && job.startedAt && elapsed.getAttribute('datetime') !== job.startedAt) {
+        elapsed.setAttribute('datetime', job.startedAt);
+        elapsed.textContent = humanDuration((Date.now() - Date.parse(job.startedAt)) / 1000);
+      }
       const next = card.querySelector('[data-job-next]');
       if (next && job.nextRun && next.getAttribute('datetime') !== job.nextRun) {
         next.setAttribute('datetime', job.nextRun);
@@ -267,6 +288,57 @@
       trigger.disabled = false;
       trigger.textContent = original;
     }
+  });
+
+  /* ------------------------------------------------------------------ cancel */
+
+  const dialog = document.querySelector('[data-cancel-dialog]');
+  let pendingCancel = null;
+
+  document.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-cancel-job]');
+    if (!trigger || trigger.disabled) return;
+    event.preventDefault();
+
+    pendingCancel = trigger.dataset.cancelJob;
+    const subject = dialog?.querySelector('[data-cancel-subject]');
+    if (subject) subject.textContent = pendingCancel;
+    dialog?.showModal();
+  });
+
+  dialog?.querySelector('[data-cancel-dismiss]')?.addEventListener('click', () => {
+    pendingCancel = null;
+    dialog.close();
+  });
+
+  dialog?.addEventListener('click', (event) => {
+    // Clicking the backdrop is a click on the dialog itself, outside its content box.
+    if (event.target === dialog) {
+      const box = dialog.getBoundingClientRect();
+      const outside = event.clientX < box.left || event.clientX > box.right
+        || event.clientY < box.top || event.clientY > box.bottom;
+      if (outside) {
+        pendingCancel = null;
+        dialog.close();
+      }
+    }
+  });
+
+  dialog?.querySelector('[data-cancel-confirm]')?.addEventListener('click', async () => {
+    if (!pendingCancel) return;
+    const jobId = pendingCancel;
+    pendingCancel = null;
+    dialog.close();
+
+    try {
+      const result = await requestJson('api/jobs/' + encodeURIComponent(jobId) + '/cancel',
+        { method: 'POST' });
+      toast(result.message || ('Stopping ' + jobId), 'ok');
+    } catch (error) {
+      // A 409 means it finished between opening the dialog and confirming, which is not a fault.
+      toast('Could not stop ' + jobId + ' — it may have already finished', 'bad');
+    }
+    await poll();
   });
 
   document.addEventListener('click', async (event) => {

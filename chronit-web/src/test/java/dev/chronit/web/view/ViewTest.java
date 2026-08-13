@@ -72,6 +72,35 @@ class ViewTest {
         assertTrue(html.contains("left cleanly"), "the outcome should read as prose: " + html);
     }
 
+    /**
+     * A cancelled visit is a third outcome, not a failure with a nicer message: it should read
+     * as stopped, and not be styled as something that went wrong.
+     */
+    @Test
+    void cancelledVisitsReadAsStoppedRatherThanFailed() {
+        RunRecord cancelled = new RunRecord("r3", "nightly", "web",
+                Instant.parse("2026-08-12T18:00:00Z"), Instant.parse("2026-08-12T18:00:04Z"),
+                List.of(new RunRecord.VisitRecord("survival", "main",
+                        Instant.parse("2026-08-12T18:00:01Z"), Duration.ofSeconds(4),
+                        false, "Cancelled by an operator", 0, 1, -1, false, null, "CANCELLED")));
+
+        String html = RunsView.render(List.of(cancelled));
+        assertTrue(html.contains("stopped by operator"), html);
+        assertFalse(html.contains("run__visit--failed"),
+                "a stopped visit must not be dressed as a failure: " + html);
+    }
+
+    /** The design language: labelled values and chips, never a run of dot-separated fragments. */
+    @Test
+    void rendersLabelledValuesRatherThanDotSeparatedText() {
+        String html = RunsView.render(List.of(runWith("Connection refused")));
+
+        assertFalse(html.contains(" · "), "no dot-joined runs should survive: " + html);
+        assertTrue(html.contains("datum__label"), html);
+        assertTrue(html.contains("datum__value"), html);
+        assertTrue(html.contains("class=\"tags\""), html);
+    }
+
     @Test
     void emptyHistoryExplainsItself() {
         String html = RunsView.render(List.of());

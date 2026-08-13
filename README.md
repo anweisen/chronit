@@ -57,6 +57,12 @@ docker compose -f docker/docker-compose.yml run --rm chronit validate
 | `chronit validate` | Check the configuration and print the resolved schedule. |
 | `chronit --version` | Version, protocol, and whether translation is installed. |
 
+A running job can be stopped from the dashboard. Cancelling disconnects the live session the way a
+client does — rather than dropping the socket and leaving the server to notice on its read timeout,
+which is what earns the next visit an "already logged in" kick — then interrupts the worker, which
+spends most of a run blocked on a sleep or a join. The visit in progress is recorded as *stopped*,
+the remaining visits are skipped, and the run still goes into the history.
+
 ## Scheduling: daemon or external cron
 
 Both work, and they run identical code.
@@ -319,6 +325,19 @@ Run history answers the questions actually asked after a failure, in order: did 
 world at all and how long that took, how long it stayed, what it managed to run, how many attempts
 it took, which protocol it spoke, and what ended it — the outcome named (`version refused`,
 `resource pack`, `auth failed`) rather than left as a message to interpret.
+
+### One vocabulary
+
+Every page is assembled from the same two shapes. Secondary information is always a **labelled
+value** — a small capitalised label above its value — so `Europe/Berlin` is visibly a timezone and
+`10s` visibly a duration, rather than both being anonymous fragments in a run-on line. Anything
+genuinely list-like is a row of **chips**. Between them those cover every place a string of
+dot-separated text would otherwise appear, and because they are literally the same components, the
+same kind of information looks the same on the dashboard, in a run's detail, on the sign-in page and
+inside the confirmation dialog.
+
+The confirmation is a native `<dialog>`, so focus trapping, the backdrop and escape-to-dismiss are
+the browser's job rather than three more things to reimplement imperfectly.
 
 ### Layout and type
 

@@ -67,8 +67,9 @@ public final class WebInterface {
 
     private final ChronitConfig config;
     private final WebConfig webConfig;
-    /** e.g. "Minecraft 26.2 · protocol 776" — supplied by the app, which knows the driver. */
-    private final String clientSummary;
+    /** Supplied by the app module, which is the one that knows the driver. */
+    private final String clientVersion;
+    private final int clientProtocol;
     private final Orchestrator orchestrator;
     private final Scheduler scheduler;
     private final AccountManager accounts;
@@ -85,10 +86,12 @@ public final class WebInterface {
                         Orchestrator orchestrator,
                         Scheduler scheduler,
                         AccountManager accounts,
-                        String clientSummary) {
+                        String clientVersion,
+                        int clientProtocol) {
         this.config = config;
         this.webConfig = config.webOrDisabled();
-        this.clientSummary = clientSummary;
+        this.clientVersion = clientVersion;
+        this.clientProtocol = clientProtocol;
         this.orchestrator = orchestrator;
         this.scheduler = scheduler;
         this.accounts = accounts;
@@ -158,6 +161,11 @@ public final class WebInterface {
             }
             if (path.startsWith("/api/jobs/") && path.endsWith("/run") && method.equals("POST")) {
                 runJob(exchange, decode(path.substring("/api/jobs/".length(), path.length() - "/run".length())));
+                return;
+            }
+            if (path.startsWith("/api/jobs/") && path.endsWith("/cancel") && method.equals("POST")) {
+                cancelJob(exchange,
+                        decode(path.substring("/api/jobs/".length(), path.length() - "/cancel".length())));
                 return;
             }
             if (path.startsWith("/accounts/") && path.endsWith("/login")) {
@@ -246,10 +254,17 @@ public final class WebInterface {
                 config,
                 scheduler.upcoming(),
                 accountStatuses(),
+                orchestrator.runningJobs(),
                 recentRuns(),
                 runsVersion(),
-                clientSummary,
+                clientVersion,
+                clientProtocol,
                 orchestrator.protocols().hasTranslation());
+    }
+
+    /** A parenthetical, which is ordinary English, rather than two facts glued with a divider. */
+    private String headerMeta() {
+        return "Minecraft " + clientVersion + " (protocol " + clientProtocol + ")";
     }
 
     private List<RunRecord> recentRuns() {
@@ -286,7 +301,7 @@ public final class WebInterface {
                     "No such Microsoft account".getBytes(StandardCharsets.UTF_8), null);
             return;
         }
-        html(exchange, 200, LoginView.render(accountId, clientSummary, assets.version()));
+        html(exchange, 200, LoginView.render(accountId, headerMeta(), assets.version()));
     }
 
     // ------------------------------------------------------------------ api
@@ -301,11 +316,17 @@ public final class WebInterface {
                 statuses.values().stream().filter(status -> !status.isUsable()).count());
 
         ArrayNode jobs = root.putArray("jobs");
+        Map<String, dev.chronit.core.run.JobExecution> active = orchestrator.runningJobs();
         for (Scheduler.Upcoming upcoming : scheduler.upcoming()) {
             ObjectNode job = jobs.addObject();
             job.put("id", upcoming.jobId());
-            job.put("running", upcoming.running());
             job.put("nextRun", upcoming.nextRun() == null ? null : upcoming.nextRun().toInstant().toString());
+
+            dev.chronit.core.run.JobExecution execution = active.get(upcoming.jobId());
+            job.put("running", execution != null);
+            job.put("startedAt", execution == null ? null : execution.startedAt().toString());
+            job.put("currentServer", execution == null ? null : execution.currentServer());
+            job.put("cancelling", execution != null && execution.isCancelled());
         }
 
         ArrayNode accountsNode = root.putArray("accounts");
@@ -347,6 +368,23 @@ public final class WebInterface {
         response.put("ok", true);
         response.put("message", "Started " + jobId);
         json(exchange, 202, response.toString());
+    }
+
+    private void cancelJob(HttpExchange exchange, String jobId) throws IOException {
+        if (config.job(jobId).isEmpty()) {
+            json(exchange, 404, "{\"ok\":false,\"message\":\"No such job\"}");
+            return;
+        }
+        boolean cancelled = orchestrator.cancel(jobId);
+
+        ObjectNode response = json.createObjectNode();
+        response.put("ok", cancelled);
+        response.put("message", cancelled
+                ? "Stopping " + jobId
+                : jobId + " is not running");
+        // Not running is a perfectly ordinary answer — someone pressed the button just as the job
+        // finished — so it is not an error, only a different outcome.
+        json(exchange, cancelled ? 202 : 409, response.toString());
     }
 
     private void loginApi(HttpExchange exchange, String accountId, String method) throws IOException {
@@ -481,12 +519,26 @@ public final class WebInterface {
         Assets() {
             load("app.css", "text/css");
             load("app.js", "text/javascript");
-            // One token derived from every asset, so a jar rebuild busts both caches at once.
-            String combined = files.values().stream()
+            // Hashed over every asset rather than taken from the front of their concatenated
+            // etags: the first asset alphabetically would otherwise be the only one that could
+            // move the token, so a change to app.js alone would keep the same URL — and these are
+            // served immutable for a year, so browsers would never ask for it again.
+            this.version = digestOf(files.values().stream()
                     .map(Asset::etag)
-                    .reduce("", String::concat)
-                    .replaceAll("[^0-9a-f]", "");
-            this.version = combined.isEmpty() ? "dev" : combined.substring(0, Math.min(10, combined.length()));
+                    .reduce("", String::concat));
+        }
+
+        private static String digestOf(String input) {
+            if (input.isEmpty()) {
+                return "dev";
+            }
+            try {
+                byte[] hash = MessageDigest.getInstance("SHA-256")
+                        .digest(input.getBytes(StandardCharsets.UTF_8));
+                return HexFormat.of().formatHex(hash).substring(0, 10);
+            } catch (Exception e) {
+                return "dev";
+            }
         }
 
         private void load(String name, String contentType) {

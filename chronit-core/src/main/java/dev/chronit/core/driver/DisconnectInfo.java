@@ -17,6 +17,8 @@ public record DisconnectInfo(
     public enum Kind {
         /** We closed the connection ourselves, as planned. */
         CLIENT_CLOSED,
+        /** An operator stopped the job while it was running. */
+        CANCELLED,
         /** The server rejected our protocol version. */
         VERSION_MISMATCH,
         /** Authentication or session validation failed. */

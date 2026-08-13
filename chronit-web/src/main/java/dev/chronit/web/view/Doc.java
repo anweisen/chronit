@@ -39,6 +39,21 @@ public final class Doc {
                               String rootPath,
                               List<Attr> bodyAttrs,
                               Node... content) {
+        return page(pageTitle, subtitle, assetVersion, rootPath, bodyAttrs,
+                Node.fragment(content), Node.empty());
+    }
+
+    /**
+     * @param overlays nodes placed after the main content — dialogs and the like, which must sit
+     *                 outside the page flow rather than inside a section of it
+     */
+    public static String page(String pageTitle,
+                              String subtitle,
+                              String assetVersion,
+                              String rootPath,
+                              List<Attr> bodyAttrs,
+                              Node content,
+                              Node overlays) {
         Node document = html(attr("lang", "en"),
                 head(
                         meta(attr("charset", "utf-8")),
@@ -65,7 +80,8 @@ public final class Doc {
                                                 attr("data-theme-toggle", ""),
                                                 attr("aria-label", "Switch between light and dark"),
                                                 Ui.icon("theme")))),
-                        Node.fragment(content),
+                        content,
+                        overlays,
                         div(cls("toasts"), attr("data-toasts", ""), attr("aria-live", "polite")),
                         script(attr("src", rootPath + "assets/app.js?v=" + assetVersion),
                                 attr("defer", null))));

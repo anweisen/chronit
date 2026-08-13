@@ -64,6 +64,14 @@ public final class VisitRunner {
     }
 
     public RunRecord.VisitRecord run(VisitConfig visit) throws InterruptedException {
+        return run(visit, null);
+    }
+
+    /**
+     * @param execution the running job, so a cancel can reach the live session. Null for an ad-hoc
+     *                  visit that nothing can cancel
+     */
+    public RunRecord.VisitRecord run(VisitConfig visit, JobExecution execution) throws InterruptedException {
         Instant startedAt = Instant.now();
         ServerConfig server = config.server(visit.server()).orElseThrow();
         AccountConfig account = config.account(visit.account()).orElseThrow();
@@ -92,7 +100,15 @@ public final class VisitRunner {
                 }
 
                 attemptsMade = attempt;
-                Attempt result = attemptVisit(visit, server, account, attempt);
+                Attempt result;
+                try {
+                    result = attemptVisit(visit, server, account, attempt, execution);
+                } catch (InterruptedException e) {
+                    if (execution != null && execution.isCancelled()) {
+                        return cancelledRecord(server, account, startedAt, attemptsMade);
+                    }
+                    throw e;
+                }
                 if (result.success()) {
                     return new RunRecord.VisitRecord(server.id(), account.id(), startedAt,
                             Duration.between(startedAt, Instant.now()), true, result.detail(),
@@ -134,7 +150,17 @@ public final class VisitRunner {
         }
     }
 
-    private Attempt attemptVisit(VisitConfig visit, ServerConfig server, AccountConfig account, int attempt)
+    /** A visit an operator stopped: a real outcome, distinct from a failure. */
+    private static RunRecord.VisitRecord cancelledRecord(ServerConfig server, AccountConfig account,
+                                                         Instant startedAt, int attemptsMade) {
+        return new RunRecord.VisitRecord(server.id(), account.id(), startedAt,
+                Duration.between(startedAt, Instant.now()), false, "Cancelled by an operator",
+                0, Math.max(1, attemptsMade), -1, false, null,
+                DisconnectInfo.Kind.CANCELLED.name());
+    }
+
+    private Attempt attemptVisit(VisitConfig visit, ServerConfig server, AccountConfig account,
+                                 int attempt, JobExecution execution)
             throws InterruptedException {
         AuthContext auth;
         try {
@@ -157,14 +183,14 @@ public final class VisitRunner {
             return Attempt.fatal(e.getMessage(), DisconnectInfo.Kind.VERSION_MISMATCH);
         }
 
-        Attempt result = connectAndRun(visit, server, target, auth, settings, plan);
+        Attempt result = connectAndRun(visit, server, target, auth, settings, plan, execution);
 
         // A rejection that names the protocol is worth one immediate retry through a translation
         // layer, since the alternative is failing a schedule over something we can work around.
         if (!result.success() && result.rejectedOverVersion()) {
             Optional<ProtocolResolver.Plan> fallback = protocols.replan(target);
             if (fallback.isPresent()) {
-                result = connectAndRun(visit, server, target, auth, settings, fallback.get());
+                result = connectAndRun(visit, server, target, auth, settings, fallback.get(), execution);
                 if (result.success()) {
                     protocols.remember(target, fallback.get());
                 }
@@ -180,7 +206,8 @@ public final class VisitRunner {
                                   ServerTarget target,
                                   AuthContext auth,
                                   SessionSettings settings,
-                                  ProtocolResolver.Plan plan) throws InterruptedException {
+                                  ProtocolResolver.Plan plan,
+                                  JobExecution execution) throws InterruptedException {
         ChatBus chat = new ChatBus();
         ScreenBus screens = new ScreenBus();
         AtomicReference<DisconnectInfo> disconnect = new AtomicReference<>();
@@ -195,6 +222,12 @@ public final class VisitRunner {
                     new Events(chat, screens, server.id(), disconnect));
         } catch (DriverException e) {
             return Attempt.fatal(e.getMessage(), DisconnectInfo.Kind.NETWORK);
+        }
+
+        // Registered before anything blocks, so a cancel arriving mid-join closes the socket
+        // instead of waiting for the readiness timeout to expire.
+        if (execution != null) {
+            execution.attach(client, server.id());
         }
 
         try {
@@ -233,6 +266,9 @@ public final class VisitRunner {
             return Attempt.failed(describeFailure(disconnect.get(), message),
                     kindOf(disconnect.get(), DisconnectInfo.Kind.UNKNOWN));
         } finally {
+            if (execution != null) {
+                execution.detach();
+            }
             chat.abort("session ended");
             screens.abort("session ended");
             client.close();

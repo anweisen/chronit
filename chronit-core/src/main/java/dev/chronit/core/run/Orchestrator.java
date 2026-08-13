@@ -39,8 +39,8 @@ public final class Orchestrator {
     private final AccountLocks locks = new AccountLocks();
     private final RunHistory history;
 
-    /** Jobs currently executing, so overlap policy can be applied. */
-    private final Map<String, Instant> running = new ConcurrentHashMap<>();
+    /** Jobs currently executing — for the overlap policy, and so they can be stopped. */
+    private final Map<String, JobExecution> running = new ConcurrentHashMap<>();
 
     private final AtomicReference<RunRecord> lastRun = new AtomicReference<>();
 
@@ -72,8 +72,26 @@ public final class Orchestrator {
         return running.containsKey(jobId);
     }
 
-    public Map<String, Instant> runningJobs() {
+    public Map<String, JobExecution> runningJobs() {
         return Map.copyOf(running);
+    }
+
+    public Optional<JobExecution> execution(String jobId) {
+        return Optional.ofNullable(running.get(jobId));
+    }
+
+    /**
+     * Stops a running job.
+     *
+     * <p>The visit in progress ends as cancelled and the remaining visits are skipped; the run is
+     * still written to the history, because "someone stopped it at 20:04" is exactly the kind of
+     * thing you want to find later.
+     *
+     * @return false when that job was not running
+     */
+    public boolean cancel(String jobId) {
+        JobExecution execution = running.get(jobId);
+        return execution != null && execution.cancel();
     }
 
     /**
@@ -84,12 +102,13 @@ public final class Orchestrator {
      */
     public Optional<RunRecord> runJob(JobConfig job, String trigger) throws InterruptedException {
         if (job.overlapOrDefault() == JobConfig.Overlap.SKIP && running.containsKey(job.id())) {
-            log.warn("Job '{}' is still running from {}; skipping this run (overlap: skip)",
-                    job.id(), running.get(job.id()));
+            log.warn("Job '{}' is still running since {}; skipping this run (overlap: skip)",
+                    job.id(), running.get(job.id()).startedAt());
             return Optional.empty();
         }
 
-        running.put(job.id(), Instant.now());
+        JobExecution execution = new JobExecution(job.id(), trigger, Thread.currentThread());
+        running.put(job.id(), execution);
         String runId = UUID.randomUUID().toString().substring(0, 8);
         Instant startedAt = Instant.now();
         List<RunRecord.VisitRecord> visits = new ArrayList<>();
@@ -99,8 +118,13 @@ public final class Orchestrator {
             VisitRunner runner = new VisitRunner(driver, accounts, protocols, locks, config);
 
             for (int i = 0; i < job.visits().size(); i++) {
+                if (execution.isCancelled()) {
+                    log.info("Job '{}' cancelled; skipping the remaining {} visit(s)",
+                            job.id(), job.visits().size() - i);
+                    break;
+                }
                 VisitConfig visit = job.visits().get(i);
-                RunRecord.VisitRecord record = runner.run(visit);
+                RunRecord.VisitRecord record = runner.run(visit, execution);
                 visits.add(record);
 
                 if (!record.success()) {
@@ -116,7 +140,7 @@ public final class Orchestrator {
                 }
 
                 boolean isLast = i == job.visits().size() - 1;
-                if (!isLast) {
+                if (!isLast && !execution.isCancelled()) {
                     Duration gap = visit.gapAfterOrDefault();
                     if (!gap.isZero()) {
                         // Also gives the server time to tear the session down before the same
@@ -126,16 +150,25 @@ public final class Orchestrator {
                     }
                 }
             }
+        } catch (InterruptedException e) {
+            if (!execution.isCancelled()) {
+                throw e;
+            }
+            log.info("Job '{}' stopped on request", job.id());
         } finally {
             running.remove(job.id());
+            // Cancelling interrupts this thread. The scheduler's pool reuses it, so the flag has
+            // to be cleared or the next job would abort the moment it slept.
+            Thread.interrupted();
         }
 
         RunRecord record = new RunRecord(runId, job.id(), trigger, startedAt, Instant.now(), List.copyOf(visits));
         history.append(record);
         lastRun.set(record);
 
-        log.info("Job '{}' finished in {} — {}/{} visit(s) succeeded",
-                job.id(), Durations.format(record.duration()), record.successCount(), visits.size());
+        log.info("Job '{}' {} in {} — {}/{} visit(s) succeeded",
+                job.id(), execution.isCancelled() ? "cancelled" : "finished",
+                Durations.format(record.duration()), record.successCount(), visits.size());
         return Optional.of(record);
     }
 

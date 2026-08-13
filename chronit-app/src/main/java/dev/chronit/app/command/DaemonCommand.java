@@ -47,7 +47,7 @@ public final class DaemonCommand implements Callable<Integer> {
         WebConfig webConfig = config.webOrDisabled();
         if (webConfig.isEnabled()) {
             web = new WebInterface(config, orchestrator, scheduler, accounts,
-                    "Minecraft " + McplDriver.NATIVE_VERSION + " · protocol " + McplDriver.NATIVE_PROTOCOL);
+                    McplDriver.NATIVE_VERSION, McplDriver.NATIVE_PROTOCOL);
             web.start();
         } else {
             log.info("Web interface disabled. Enable it with web.enabled: true to see status and "
