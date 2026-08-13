@@ -1,0 +1,130 @@
+# Deployment setup: no source tree, no application build.
+#
+# Copy this folder to the server, drop in the two files it needs, and start it:
+#
+#   chronit-app.jar   the built jar (chronit-app/build/libs/chronit.jar, renamed)
+#   chronit.yml       your configuration
+#
+#   docker compose run --rm chronit login main    # once, to authorise the account
+#   docker compose up -d
+#
+# Everything that must survive a restart lives in the chronit-data volume, never in this folder.
+#
+# The dashboard is published through Traefik at the host in CHRONIT_HOST. Running without Traefik
+# takes three deletions — see "Without Traefik" in README.md.
+name: chronit
+
+services:
+  chronit:
+    # Builds the small runtime image described in Dockerfile. It compiles nothing and needs no
+    # source: it exists to own /data as a non-root user and to carry the entrypoint's checks.
+    build: .
+    image: chronit-runtime:latest
+    container_name: chronit
+    restart: unless-stopped
+
+    # Reaps zombies and forwards signals, so `docker compose stop` reaches the shutdown hook and
+    # the client leaves servers cleanly rather than having its socket dropped.
+    init: true
+
+    # Values come from a .env file beside this one, if there is one. See .env.example.
+    environment:
+      # Only affects log timestamps and any job that does not name its own timezone.
+      TZ: ${TZ:-UTC}
+      # Encrypts the stored Microsoft session at rest. Keep it stable — changing it makes the
+      # existing token file unreadable, and chronit will refuse to start over the top of it.
+      CHRONIT_SECRET_KEY: ${CHRONIT_SECRET_KEY:-}
+      CHRONIT_LOG_LEVEL: ${CHRONIT_LOG_LEVEL:-INFO}
+      # Where the volume is mounted. Must match `stateDir` in chronit.yml — it is only used to
+      # check the directory is writable before starting, which is what catches a misconfigured
+      # mount before it silently discards every session on the next restart.
+      CHRONIT_DATA: /data
+      # Read by chronit.yml as ${CHRONIT_WEB_TOKEN}. Required once the dashboard is reachable:
+      # chronit refuses to start with a non-loopback bind and no token. A missing variable is a
+      # startup error naming it, not a silently unauthenticated dashboard.
+      CHRONIT_WEB_TOKEN: ${CHRONIT_WEB_TOKEN:?set CHRONIT_WEB_TOKEN in .env — the dashboard is internet-facing}
+      # Server passwords, if you would rather not keep a secrets file. Masked in the log either
+      # way. The name after the prefix is what {{secrets.name}} refers to, uppercased.
+      # CHRONIT_SECRET_SURVIVAL_PASSWORD: ${SURVIVAL_PASSWORD:-}
+
+    volumes:
+      # This folder, read-only: chronit reads the jar and the configuration and writes neither.
+      # Mounted as a directory rather than as two files so that replacing the jar and restarting
+      # actually picks up the new one — a single-file bind mount keeps pointing at the inode it
+      # was created with, and you would go on running the old jar with no sign of it.
+      - ./:/app:ro
+
+      # Tokens, run history and the resource pack cache. This is the only thing worth backing up,
+      # and the only thing that must not be deleted: losing it means authorising every account
+      # again from a browser.
+      - chronit-data:/data
+
+    networks:
+      # Traefik reaches the container over this network, so both must be on it.
+      - traefik
+
+    # Not needed with Traefik, which connects over the Docker network rather than through a
+    # published port. Uncomment only to reach the dashboard without Traefik, over an SSH tunnel.
+    # ports:
+    #   - "127.0.0.1:8477:8477"
+
+    # Runs inside the container, so it needs no published port and no token.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8477/healthz"]
+      interval: 60s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+    labels:
+      # --- Discovery ------------------------------------------------------------------------
+      # Required. Traefik's Docker provider is normally run with exposedByDefault=false, which
+      # means a container without this label is invisible to it — no error, no route, nothing.
+      - "traefik.enable=true"
+
+      # Required whenever the container is on more than one network, and harmless when it is not.
+      # Without it Traefik picks whichever network it finds first and can end up with an address
+      # it has no route to, which shows up as a 502 that looks like the application is down.
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik}"
+
+      # --- Router ---------------------------------------------------------------------------
+      - "traefik.http.routers.chronit.rule=Host(`${CHRONIT_HOST:-chronit.anweisen.net}`)"
+      - "traefik.http.routers.chronit.entrypoints=websecure"
+      - "traefik.http.routers.chronit.service=chronit"
+
+      # tls=true is the label that has no counterpart in the file provider: there, nesting a `tls`
+      # key is itself the switch. In labels the certresolver alone does not enable TLS.
+      - "traefik.http.routers.chronit.tls=true"
+      - "traefik.http.routers.chronit.tls.certresolver=cloudflare"
+      # Optional — Traefik derives the certificate domain from the Host rule. Kept to mirror the
+      # file config, and because it is where a wildcard would go (main + sans).
+      - "traefik.http.routers.chronit.tls.domains[0].main=${CHRONIT_HOST:-chronit.anweisen.net}"
+
+      # --- Service --------------------------------------------------------------------------
+      # Replaces the file provider's `servers[].url`. The Docker provider resolves the container's
+      # address itself, so only the port is given — and it must be, because this image declares no
+      # EXPOSE for Traefik to guess from.
+      - "traefik.http.services.chronit.loadbalancer.server.port=8477"
+      # Already the default; kept to mirror the file config.
+      - "traefik.http.services.chronit.loadbalancer.passhostheader=true"
+
+      # --- Optional hardening ---------------------------------------------------------------
+      # A second gate in front of chronit's own token. Worth it: this dashboard can start a
+      # Microsoft device-code login and stop running jobs. Generate a line with
+      #   htpasswd -nB you
+      # and double every $ in it, because Compose reads $ as interpolation.
+      # - "traefik.http.routers.chronit.middlewares=chronit-auth"
+      # - "traefik.http.middlewares.chronit-auth.basicauth.users=you:$$2y$$05$$..."
+
+volumes:
+  chronit-data:
+    # Named explicitly. Without this Compose prefixes the project name and the volume is really
+    # called chronit_chronit-data — at which point every `docker run -v chronit-data:/data` in the
+    # documentation quietly creates a second, empty volume instead of opening the real one, and a
+    # backup taken that way contains nothing.
+    name: chronit-data
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}

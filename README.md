@@ -44,6 +44,12 @@ Check what the schedule will actually do before leaving it unattended:
 docker compose -f docker/docker-compose.yml run --rm chronit validate
 ```
 
+There are two Docker setups, and they are for different jobs. [`docker/`](docker) builds chronit
+from this source tree and is what the commands above use — right for development, and for a server
+you are happy to build on. [`deploy/`](deploy/README.md) builds nothing: you copy that one folder
+to a server, drop in a jar you built elsewhere and your `chronit.yml`, and start it. Use it when
+the server has no source tree, no JDK, and no reason to acquire either.
+
 ## Commands
 
 | Command | Purpose |

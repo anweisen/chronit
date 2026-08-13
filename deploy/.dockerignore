@@ -1,0 +1,8 @@
+# The image build only needs entrypoint.sh. Without this, the 27 MB jar sitting in this folder
+# would be uploaded to the Docker daemon on every build.
+*.jar
+chronit.yml
+.env
+README.md
+docker-compose.yml
+data/
