@@ -116,6 +116,14 @@ docker network ls
 **3. The `cloudflare` certificate resolver must exist in Traefik's static configuration.** The
 label only refers to it by name. Nothing here defines a resolver.
 
+Nothing extra is needed for the live updates. The dashboard is pushed to over a long-lived
+`text/event-stream` on `/events`, and Traefik streams responses through rather than buffering them,
+so it works as configured. In front of **nginx** it would not: nginx buffers proxied responses by
+default, which holds every event until its buffer fills — indistinguishable from a dead connection
+on a stream of a few hundred bytes a minute. chronit sends `X-Accel-Buffering: no` on the stream,
+which nginx honours; if you put something else in front, check that it does not buffer and that its
+idle timeout is above the twenty-second heartbeat.
+
 Then:
 
 ```bash

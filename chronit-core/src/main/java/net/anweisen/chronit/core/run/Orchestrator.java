@@ -8,6 +8,8 @@ import net.anweisen.chronit.core.config.VisitConfig;
 import net.anweisen.chronit.core.driver.MinecraftClientDriver;
 import net.anweisen.chronit.core.state.RunHistory;
 import net.anweisen.chronit.core.state.RunRecord;
+import net.anweisen.chronit.core.state.RunStatus;
+import net.anweisen.chronit.core.state.VisitStatus;
 import net.anweisen.chronit.core.util.Durations;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,10 +18,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -41,6 +45,16 @@ public final class Orchestrator {
 
     /** Jobs currently executing — for the overlap policy, and so they can be stopped. */
     private final Map<String, JobExecution> running = new ConcurrentHashMap<>();
+
+    /**
+     * Told whenever anything observable about a run changes.
+     *
+     * <p>This is what makes the dashboard live rather than polled. It is deliberately a bare
+     * signal with no payload: the web interface already knows how to describe the whole state, and
+     * a listener that has to be kept in step with a growing event vocabulary is a listener that
+     * eventually falls behind it. Listeners run on the job thread, so they must not block.
+     */
+    private final List<Runnable> watchers = new CopyOnWriteArrayList<>();
 
     private final AtomicReference<RunRecord> lastRun = new AtomicReference<>();
 
@@ -81,6 +95,27 @@ public final class Orchestrator {
     }
 
     /**
+     * Registers a listener told whenever a run changes state.
+     *
+     * @return a handle that removes the listener again
+     */
+    public AutoCloseable watch(Runnable listener) {
+        watchers.add(listener);
+        return () -> watchers.remove(listener);
+    }
+
+    /** Never lets a misbehaving listener take a job down with it. */
+    private void announce() {
+        for (Runnable watcher : watchers) {
+            try {
+                watcher.run();
+            } catch (RuntimeException e) {
+                log.debug("A run listener failed: {}", e.toString());
+            }
+        }
+    }
+
+    /**
      * Stops a running job.
      *
      * <p>The visit in progress ends as cancelled and the remaining visits are skipped; the run is
@@ -107,39 +142,48 @@ public final class Orchestrator {
             return Optional.empty();
         }
 
-        JobExecution execution = new JobExecution(job.id(), trigger, Thread.currentThread());
+        List<VisitConfig> plan = job.visits() == null ? List.of() : job.visits();
+        JobExecution execution = new JobExecution(
+                job.id(), trigger, Thread.currentThread(), plan.size(), this::announce);
         running.put(job.id(), execution);
         String runId = UUID.randomUUID().toString().substring(0, 8);
         Instant startedAt = Instant.now();
         List<RunRecord.VisitRecord> visits = new ArrayList<>();
+        // Why the chain stopped, recorded on every visit it never reached rather than leaving
+        // those visits out of the history entirely.
+        String abandonedBecause = null;
 
-        log.info("Starting job '{}' ({} visit(s), trigger: {})", job.id(), job.visits().size(), trigger);
+        log.info("Starting job '{}' ({} visit(s), trigger: {})", job.id(), plan.size(), trigger);
+        announce();
         try {
             VisitRunner runner = new VisitRunner(driver, accounts, protocols, locks, config);
 
-            for (int i = 0; i < job.visits().size(); i++) {
+            for (int i = 0; i < plan.size(); i++) {
                 if (execution.isCancelled()) {
                     log.info("Job '{}' cancelled; skipping the remaining {} visit(s)",
-                            job.id(), job.visits().size() - i);
+                            job.id(), plan.size() - i);
+                    abandonedBecause = "The job was stopped before this visit";
                     break;
                 }
-                VisitConfig visit = job.visits().get(i);
-                RunRecord.VisitRecord record = runner.run(visit, execution);
+                VisitConfig visit = plan.get(i);
+                RunRecord.VisitRecord record = runner.run(visit, execution, i + 1);
                 visits.add(record);
+                announce();
 
-                if (!record.success()) {
+                if (!record.success() && record.status() != VisitStatus.CANCELLED) {
                     RetryConfig retry = visit.onFail() != null
                             ? visit.onFail().withFallback(config.effectiveDefaults().onFail())
                             : config.effectiveDefaults().onFail();
                     if (retry.then() == RetryConfig.OnFail.ABORT_JOB) {
                         log.error("Visit to '{}' failed ({}); abandoning the rest of job '{}'",
                                 visit.server(), record.detail(), job.id());
+                        abandonedBecause = "Abandoned after '" + visit.server() + "' failed";
                         break;
                     }
                     log.warn("Visit to '{}' failed ({}); moving on", visit.server(), record.detail());
                 }
 
-                boolean isLast = i == job.visits().size() - 1;
+                boolean isLast = i == plan.size() - 1;
                 if (!isLast && !execution.isCancelled()) {
                     Duration gap = visit.gapAfterOrDefault();
                     if (!gap.isZero()) {
@@ -155,6 +199,9 @@ public final class Orchestrator {
                 throw e;
             }
             log.info("Job '{}' stopped on request", job.id());
+            if (abandonedBecause == null) {
+                abandonedBecause = "The job was stopped before this visit";
+            }
         } finally {
             running.remove(job.id());
             // Cancelling interrupts this thread. The scheduler's pool reuses it, so the flag has
@@ -162,14 +209,48 @@ public final class Orchestrator {
             Thread.interrupted();
         }
 
-        RunRecord record = new RunRecord(runId, job.id(), trigger, startedAt, Instant.now(), List.copyOf(visits));
+        // Visits are appended in plan order, so whatever is left of the plan is what never ran.
+        for (int i = visits.size(); i < plan.size(); i++) {
+            VisitConfig visit = plan.get(i);
+            visits.add(RunRecord.VisitRecord.skipped(visit.server(), visit.account(),
+                    abandonedBecause == null ? "Never attempted" : abandonedBecause));
+        }
+
+        RunRecord record = new RunRecord(runId, job.id(), trigger, startedAt, Instant.now(),
+                visits, statusOf(execution, visits));
         history.append(record);
         lastRun.set(record);
+        announce();
 
-        log.info("Job '{}' {} in {} — {}/{} visit(s) succeeded",
-                job.id(), execution.isCancelled() ? "cancelled" : "finished",
-                Durations.format(record.duration()), record.successCount(), visits.size());
+        log.info("Job '{}' {} in {} — {}/{} visit(s) succeeded, {} skipped",
+                job.id(), record.status().name().toLowerCase(Locale.ENGLISH),
+                Durations.format(record.duration()), record.successCount(), record.attemptedCount(),
+                record.skippedCount());
         return Optional.of(record);
+    }
+
+    /**
+     * The one place a run's overall status is decided.
+     *
+     * <p>Cancellation wins over everything else, including a chain whose visits all happened to
+     * succeed before someone pressed stop — an operator who stopped a job wants to see that they
+     * did, not a green tick.
+     */
+    private static RunStatus statusOf(JobExecution execution, List<RunRecord.VisitRecord> visits) {
+        if (execution.isCancelled()) {
+            return RunStatus.CANCELLED;
+        }
+        long attempted = visits.stream()
+                .filter(visit -> visit.status() != VisitStatus.SKIPPED)
+                .count();
+        if (attempted == 0) {
+            return RunStatus.SKIPPED;
+        }
+        long succeeded = visits.stream().filter(RunRecord.VisitRecord::success).count();
+        if (succeeded == attempted) {
+            return RunStatus.SUCCEEDED;
+        }
+        return succeeded == 0 ? RunStatus.FAILED : RunStatus.PARTIAL;
     }
 
     /** Runs a single ad-hoc visit, as used by {@code chronit run --server ...}. */

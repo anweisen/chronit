@@ -25,9 +25,12 @@ final class LoginFlows {
 
     private final AccountManager accounts;
     private final Map<String, Flow> active = new ConcurrentHashMap<>();
+    /** Told on every transition, so the sign-in page is pushed to rather than polling. */
+    private final java.util.function.Consumer<String> onChange;
 
-    LoginFlows(AccountManager accounts) {
+    LoginFlows(AccountManager accounts, java.util.function.Consumer<String> onChange) {
         this.accounts = accounts;
+        this.onChange = onChange;
     }
 
     enum State { STARTING, WAITING, DONE, FAILED }
@@ -45,16 +48,16 @@ final class LoginFlows {
         if (existing != null && (existing.state() == State.STARTING || existing.state() == State.WAITING)) {
             return;
         }
-        active.put(account.id(), new Flow(State.STARTING, null, "Requesting a code...", Instant.now()));
+        set(account.id(), new Flow(State.STARTING, null, "Requesting a code...", Instant.now()));
 
         Thread worker = new Thread(() -> {
             try {
-                accounts.login(account, prompt -> active.put(account.id(),
+                accounts.login(account, prompt -> set(account.id(),
                         new Flow(State.WAITING, prompt, "Waiting for authorisation", Instant.now())));
-                active.put(account.id(), new Flow(State.DONE, null, "Logged in", Instant.now()));
+                set(account.id(), new Flow(State.DONE, null, "Logged in", Instant.now()));
             } catch (AuthException e) {
                 log.warn("Browser-initiated login for '{}' failed: {}", account.id(), e.getMessage());
-                active.put(account.id(), new Flow(State.FAILED, null, e.getMessage(), Instant.now()));
+                set(account.id(), new Flow(State.FAILED, null, e.getMessage(), Instant.now()));
             }
         }, "chronit-login-" + account.id());
         worker.setDaemon(true);
@@ -63,5 +66,12 @@ final class LoginFlows {
 
     void clear(String accountId) {
         active.remove(accountId);
+    }
+
+    private void set(String accountId, Flow flow) {
+        active.put(accountId, flow);
+        if (onChange != null) {
+            onChange.accept(accountId);
+        }
     }
 }

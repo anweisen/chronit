@@ -1,6 +1,8 @@
 package net.anweisen.chronit.web.view;
 
 import net.anweisen.chronit.core.state.RunRecord;
+import net.anweisen.chronit.core.state.RunStatus;
+import net.anweisen.chronit.core.state.VisitStatus;
 import net.anweisen.chronit.core.util.Redactor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -9,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -85,20 +88,93 @@ class ViewTest {
                         false, "Cancelled by an operator", 0, 1, -1, false, null, "CANCELLED")));
 
         String html = RunsView.render(List.of(cancelled));
+        assertEquals(RunStatus.CANCELLED, cancelled.status());
         assertTrue(html.contains("stopped by operator"), html);
-        assertFalse(html.contains("run__visit--failed"),
-                "a stopped visit must not be dressed as a failure: " + html);
+        assertTrue(html.contains("is-stop"), html);
+        assertFalse(html.contains("is-bad"),
+                "a stopped visit must not be coloured as a failure: " + html);
     }
 
-    /** The design language: labelled values and chips, never a run of dot-separated fragments. */
+    /**
+     * The design language: labelled values and a marked state word, never a run of dot-separated
+     * fragments and never a capsule with a background.
+     */
     @Test
     void rendersLabelledValuesRatherThanDotSeparatedText() {
         String html = RunsView.render(List.of(runWith("Connection refused")));
 
         assertFalse(html.contains(" · "), "no dot-joined runs should survive: " + html);
-        assertTrue(html.contains("datum__label"), html);
-        assertTrue(html.contains("datum__value"), html);
-        assertTrue(html.contains("class=\"tags\""), html);
+        assertTrue(html.contains("fact__label"), html);
+        assertTrue(html.contains("fact__value"), html);
+        assertTrue(html.contains("class=\"meta__label\""), html);
+        assertTrue(html.contains("state__mark"), "a state is a mark and a word: " + html);
+        assertFalse(html.contains("class=\"chip"), "chips were replaced by states: " + html);
+    }
+
+    /**
+     * One table everywhere. A run's detail used to mix an inline pair strip with a reflowing grid,
+     * which is two ways of showing a label and a value on the same screen.
+     */
+    @Test
+    void detailUsesTheAlignedTableAndNothingElse() {
+        String html = RunsView.render(List.of(runWith("Connection refused")));
+
+        assertTrue(html.contains("class=\"facts\""), html);
+        assertFalse(html.contains("class=\"data"),
+                "the reflowing grid was replaced by the aligned table: " + html);
+        // The inline strip survives only in the collapsed summary, never inside the detail.
+        assertEquals(1, html.split("class=\"meta\"", -1).length - 1,
+                "only the run summary may use the inline strip: " + html);
+    }
+
+    /**
+     * A run that got partway through is neither a success nor a failure, and saying so is the
+     * whole point of having more than a boolean.
+     */
+    @Test
+    void partialRunsAreNeitherSucceededNorFailed() {
+        RunRecord partial = new RunRecord("r4", "nightly", "schedule",
+                Instant.parse("2026-08-12T18:00:00Z"), Instant.parse("2026-08-12T18:30:00Z"),
+                List.of(
+                        new RunRecord.VisitRecord("survival", "main",
+                                Instant.parse("2026-08-12T18:00:01Z"), Duration.ofMinutes(20),
+                                true, "ran 2 action(s)", 2, 1, 776, false,
+                                Duration.ofSeconds(4), "CLIENT_CLOSED"),
+                        new RunRecord.VisitRecord("creative", "main",
+                                Instant.parse("2026-08-12T18:21:00Z"), Duration.ofMinutes(9),
+                                false, "Connection refused", 0, 2, -1, false, null, "NETWORK")));
+
+        assertEquals(RunStatus.PARTIAL, partial.status());
+        String html = RunsView.render(List.of(partial));
+        assertTrue(html.contains("partial"), html);
+        assertTrue(html.contains("1 of 2"), "the tally says how much of the chain worked: " + html);
+    }
+
+    /**
+     * Visits a stopped job never reached used to be missing from the history entirely, which made
+     * a five-visit job look like a two-visit one.
+     */
+    @Test
+    void visitsThatWereNeverReachedAreShownRatherThanOmitted() {
+        RunRecord stopped = new RunRecord("r5", "nightly", "web",
+                Instant.parse("2026-08-12T18:00:00Z"), Instant.parse("2026-08-12T18:04:00Z"),
+                List.of(
+                        new RunRecord.VisitRecord("survival", "main",
+                                Instant.parse("2026-08-12T18:00:01Z"), Duration.ofSeconds(30),
+                                false, "Stopped by an operator", 0, 1, -1, false, null,
+                                "CANCELLED", VisitStatus.CANCELLED),
+                        RunRecord.VisitRecord.skipped("creative", "main",
+                                "The job was stopped before this visit")),
+                RunStatus.CANCELLED);
+
+        assertEquals(2, stopped.visits().size());
+        assertEquals(1, stopped.skippedCount());
+
+        String html = RunsView.render(List.of(stopped));
+        assertTrue(html.contains("creative"), "a visit that never ran is still listed: " + html);
+        assertTrue(html.contains("not reached"), html);
+        assertTrue(html.contains("1 not reached"), "the tally separates skipped from failed: " + html);
+        assertFalse(html.contains("is-bad"), "nothing here failed: " + html);
     }
 
     @Test

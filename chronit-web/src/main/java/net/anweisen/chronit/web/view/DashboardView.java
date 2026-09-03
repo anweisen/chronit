@@ -20,6 +20,7 @@ import net.anweisen.chronit.web.html.Node;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -31,6 +32,7 @@ import static net.anweisen.chronit.web.html.H.cls;
 import static net.anweisen.chronit.web.html.H.code;
 import static net.anweisen.chronit.web.html.H.details;
 import static net.anweisen.chronit.web.html.H.div;
+import static net.anweisen.chronit.web.html.H.el;
 import static net.anweisen.chronit.web.html.H.h1;
 import static net.anweisen.chronit.web.html.H.h2;
 import static net.anweisen.chronit.web.html.H.h3;
@@ -50,10 +52,13 @@ import static net.anweisen.chronit.web.html.H.urlSegment;
  * The dashboard.
  *
  * <p>Ordered by what an operator wants to know, in that order: is anything waiting on me, what is
- * running, what is coming, what happened. The summary reads as a sentence rather than a row of
- * tiles or a string of fragments separated by dots — everything below it is built from the two
- * shared shapes in {@link Ui}, a labelled value and a chip, so the same kind of information looks
- * the same wherever it appears.
+ * running, what is coming, what happened.
+ *
+ * <p>The page is built from rules and rails rather than from boxes. Each region is a band with its
+ * name set in the margin; each job, account and run is a row with a two-pixel coloured edge and a
+ * hairline under it. Nothing is a card, because a screen of cards is a screen of identical
+ * rectangles competing for the same attention, and the thing that actually needs attention — a job
+ * that is running, an account that has expired — has nothing left to distinguish it with.
  */
 public final class DashboardView {
 
@@ -95,11 +100,9 @@ public final class DashboardView {
 
     public static String render(Model model, String assetVersion) {
         return Doc.page("chronit", model.headerMeta(), assetVersion, "./",
-                List.of(attr("data-dashboard", "true"),
-                        attr("data-runs-version", String.valueOf(model.runsVersion()))),
+                List.of(attr("data-dashboard", "true")),
                 main(cls("page"),
-                        hero(model),
-                        attention(model),
+                        section(cls("overview"), attr("data-overview", ""), overview(model)),
                         jobs(model),
                         accounts(model),
                         runs(model),
@@ -107,50 +110,77 @@ public final class DashboardView {
                 cancelDialog());
     }
 
-    // ---------------------------------------------------------------- hero
-
     /**
-     * A sentence, not a set of fragments.
+     * The top of the page, re-rendered on the server and pushed whole.
      *
-     * <p>The next fire time is the one number worth reading at a glance, so it is the only thing
-     * emphasised; the rest is ordinary prose around it.
+     * <p>It is prose and a number, and both change with the state of the whole daemon rather than
+     * with any one row, so patching it field by field from the browser would mean writing the same
+     * sentences twice in two languages.
      */
-    private static Node hero(Model model) {
+    public static String overviewFragment(Model model) {
+        return overview(model).toHtml();
+    }
+
+    // ---------------------------------------------------------------- overview
+
+    private static Node overview(Model model) {
+        List<Scheduler.Upcoming> running = model.upcoming().stream()
+                .filter(Scheduler.Upcoming::running)
+                .toList();
         Optional<Scheduler.Upcoming> next = model.upcoming().stream()
                 .filter(u -> u.nextRun() != null)
                 .findFirst();
-        long running = model.upcoming().stream().filter(Scheduler.Upcoming::running).count();
-        int jobCount = model.config().jobsOrEmpty().size();
-        int accountCount = model.accounts().size();
 
-        Node sentence;
-        if (running > 0) {
-            sentence = p(cls("hero__lead"),
-                    span(cls("hero__strong"),
-                            text(running == 1 ? "One job is running" : running + " jobs are running")),
-                    text(" right now."));
+        Node headline;
+        if (!running.isEmpty()) {
+            JobExecution first = model.runningJobs().get(running.getFirst().jobId());
+            headline = Node.fragment(
+                    p(cls("overview__eyebrow is-live"),
+                            span(cls("overview__beacon"), attr("aria-hidden", "true")),
+                            text(running.size() == 1 ? "Running now" : running.size() + " running now")),
+                    h1(cls("overview__value"),
+                            first == null
+                                    ? text(running.getFirst().jobId())
+                                    : time(attr("datetime", first.startedAt().toString()),
+                                    attr("data-relative", ""), attr("data-elapsed", ""),
+                                    attr("title", first.startedAt().toString()),
+                                    text(Durations.format(first.elapsed())))),
+                    p(cls("overview__sub"),
+                            text(running.size() == 1
+                                    ? "elapsed on " + running.getFirst().jobId()
+                                    : "elapsed on " + running.getFirst().jobId() + ", and "
+                                    + count(running.size() - 1, "other job"))));
         } else if (next.isPresent()) {
             Scheduler.Upcoming upcoming = next.get();
-            sentence = p(cls("hero__lead"),
-                    text("Next run "),
-                    time(cls("hero__strong"),
-                            attr("datetime", upcoming.nextRun().toInstant().toString()),
-                            attr("data-relative", ""),
-                            attr("data-hero-next", ""),
-                            attr("title", upcoming.nextRun().toString()),
-                            text("in " + upcoming.inText())),
-                    text(", for " + upcoming.jobId() + "."));
+            headline = Node.fragment(
+                    p(cls("overview__eyebrow"), text("Next run")),
+                    h1(cls("overview__value"),
+                            time(attr("datetime", upcoming.nextRun().toInstant().toString()),
+                                    attr("data-relative", ""),
+                                    attr("data-bare", ""),
+                                    attr("data-hero-next", ""),
+                                    attr("title", upcoming.nextRun().toString()),
+                                    text(upcoming.inText()))),
+                    p(cls("overview__sub"), text("until " + upcoming.jobId())));
         } else {
-            sentence = p(cls("hero__lead"), text("Nothing is scheduled."));
+            headline = Node.fragment(
+                    p(cls("overview__eyebrow"), text("Idle")),
+                    h1(cls("overview__value overview__value--quiet"), text("Nothing scheduled")),
+                    p(cls("overview__sub"), text("No enabled job has a fire time.")));
         }
 
-        return section(cls("hero"),
-                h1(cls("hero__title"), text("Overview")),
-                sentence,
-                Ui.tags(
-                        Ui.tag(count(jobCount, "job")),
-                        Ui.tag(count(accountCount, "account")),
-                        Ui.tag(count(model.config().serversOrEmpty().size(), "server"))));
+        long needingLogin = model.accountsNeedingLogin().size();
+
+        return Node.fragment(
+                div(cls("overview__lead"), headline),
+                div(cls("overview__figures"),
+                        Ui.figure(text(String.valueOf(model.config().jobsOrEmpty().size())), "jobs"),
+                        Ui.figure(text(String.valueOf(model.config().serversOrEmpty().size())), "servers"),
+                        Ui.figure(needingLogin == 0
+                                        ? text(String.valueOf(model.accounts().size()))
+                                        : span(cls("is-warn"), text(needingLogin + "/" + model.accounts().size())),
+                                needingLogin == 0 ? "accounts" : "need signing in")),
+                attention(model));
     }
 
     /** "1 job" but "2 jobs" — the kind of detail whose absence is immediately noticeable. */
@@ -159,9 +189,19 @@ public final class DashboardView {
     }
 
     /**
+     * Enum names are shouted constants in the source and ordinary words on the page.
+     *
+     * <p>{@code ABORT_JOB} shown verbatim is the configuration format leaking into the interface;
+     * every value on this page reads as English for the same reason every label does.
+     */
+    private static String lower(Object value) {
+        return String.valueOf(value).toLowerCase(Locale.ENGLISH).replace('_', ' ');
+    }
+
+    /**
      * The one thing that might need a person.
      *
-     * <p>Rendered only when it applies, which is what earns it this much room: a permanent tile
+     * <p>Rendered only when it applies, which is what earns it this much room: a permanent line
      * reading "0 need login" is noise, whereas an account whose refresh token has expired stops
      * every scheduled run until someone signs in.
      */
@@ -177,78 +217,206 @@ public final class DashboardView {
                 ? "Account “" + first.id() + "” needs signing in"
                 : needing.size() + " accounts need signing in";
 
-        return section(cls("notice notice--warn"), attr("role", "status"),
-                span(cls("notice__icon"), Ui.icon("warn")),
-                div(cls("notice__body"),
-                        h2(cls("notice__title"), text(title)),
-                        p(cls("notice__detail"), text(status == null ? "" : status.detail()))),
+        return div(cls("alert"), attr("role", "status"),
+                Ui.rail(Ui.Tone.WARN),
+                span(cls("alert__icon"), Ui.icon("warn")),
+                div(cls("alert__body"),
+                        p(cls("alert__title"), text(title)),
+                        p(cls("alert__detail"), text(status == null ? "" : status.detail()))),
                 first.authOrDefault() == AccountConfig.AuthMode.MICROSOFT
-                        ? a(cls("btn btn--primary notice__action"),
+                        ? a(cls("link-action"),
                         href("accounts/" + urlSegment(first.id()) + "/login"),
-                        text("Sign in"))
+                        span(text("Sign in")), Ui.icon("arrow"))
                         : Node.empty());
+    }
+
+    // ---------------------------------------------------------------- bands
+
+    /**
+     * A region of the page: its name in the margin, its contents alongside.
+     *
+     * <p>This is what replaced the panel. A heading in the left column reads as a label on the
+     * whole band rather than as a title inside a container, which is the difference between a page
+     * that is organised and a page that is subdivided.
+     */
+    private static Node band(String anchor, String title, String note, Node body) {
+        return section(cls("band"), attr("id", anchor),
+                div(cls("band__label"),
+                        h2(cls("band__title"), text(title)),
+                        note == null ? Node.empty() : p(cls("band__note"), text(note))),
+                div(cls("band__body"), body));
     }
 
     // ---------------------------------------------------------------- jobs
 
     private static Node jobs(Model model) {
         List<JobConfig> jobs = model.config().jobsOrEmpty();
-        return section(cls("panel"),
-                div(cls("panel__head"),
-                        h2(cls("panel__title"), text("Jobs")),
-                        span(cls("panel__note"),
-                                text(model.translationInstalled()
-                                        ? "protocol translation installed"
-                                        : "native protocol only"))),
+        return band("jobs", "Jobs",
+                model.translationInstalled()
+                        ? "Protocol translation is installed, so older servers are reachable."
+                        : "Native protocol only. No translation layer is bundled.",
                 jobs.isEmpty()
                         ? Ui.empty("No jobs configured.")
-                        : div(cls("stack"), Node.each(jobs, job -> jobCard(model, job))));
+                        : div(cls("rows"), Node.each(jobs, job -> jobRow(model, job))));
     }
 
-    private static Node jobCard(Model model, JobConfig job) {
+    private static Node jobRow(Model model, JobConfig job) {
         Optional<Scheduler.Upcoming> upcoming = model.upcomingFor(job.id());
         JobExecution execution = model.runningJobs().get(job.id());
         boolean running = execution != null;
         Optional<RunRecord> lastRun = model.lastRunFor(job.id());
         List<VisitConfig> visits = job.visits() == null ? List.of() : job.visits();
 
-        Node runningChip = running
-                ? Ui.runningChip()
-                : span(attr("data-job-status", ""), attr("hidden", null), Ui.runningChip());
-        Node disabledChip = job.isEnabled() ? Node.empty() : Ui.chip(Ui.Tone.WARN, "disabled");
-        Node outcomeChip = lastRun.isEmpty()
-                ? Node.empty()
-                : lastRun.get().succeeded()
-                ? Ui.chip(Ui.Tone.OK, "last run ok")
-                : Ui.chip(Ui.Tone.BAD, "last run failed");
+        Ui.Tone tone = running ? Ui.Tone.LIVE
+                : !job.isEnabled() ? Ui.Tone.SKIP
+                : lastRun.map(run -> Ui.toneOf(run.status())).orElse(Ui.Tone.NEUTRAL);
 
-        String classes = "job"
-                + (running ? " job--running" : "")
-                + (job.isEnabled() ? "" : " job--disabled");
+        return article(cls("row row--job" + (running ? " is-running" : "")
+                        + (job.isEnabled() ? "" : " is-disabled")),
+                attr("data-job", job.id()),
+                span(cls("row__rail rail " + tone.className()), attr("data-job-rail", ""),
+                        attr("aria-hidden", "true"), span(cls("rail__node"))),
+                div(cls("row__main"),
+                        // The head and the live line share one block with no gap between them:
+                        // the reveal carries that space inside itself, so a closed one leaves
+                        // nothing behind.
+                        div(cls("row__lead"),
+                        div(cls("row__head"),
+                                div(cls("row__identity"),
+                                        h3(cls("row__name"), text(job.id())),
+                                        div(cls("row__state"), attr("data-job-status", ""),
+                                                jobState(job, execution, lastRun))),
+                                // One slot, two controls. They cross-fade rather than one vanishing
+                                // and the other appearing, so the row keeps its width at the exact
+                                // moment the pointer is over the button being replaced.
+                                div(cls("row__actions"),
+                                        div(cls("swap"),
+                                                button(cls("btn btn--primary"
+                                                                + (running ? " is-away" : "")),
+                                                        attr("type", "button"),
+                                                        attr("data-run-job", job.id()),
+                                                        attr("data-when", "idle"),
+                                                        Ui.icon("play"), span(text("Run now"))),
+                                                button(cls("btn btn--stop"
+                                                                + (running ? "" : " is-away")),
+                                                        attr("type", "button"),
+                                                        attr("data-cancel-job", job.id()),
+                                                        attr("data-when", "running"),
+                                                        Ui.icon("stop"), span(text("Stop")))))),
+                                liveLine(execution, visits.size())),
+                        Ui.facts(
+                                // The one number worth reading first on a job, so it leads and it
+                                // is the only value here set heavier than its neighbours.
+                                Ui.factStrong(running ? "Running for" : "Next run",
+                                        running ? elapsedTime(execution) : nextRunTime(upcoming)),
+                                Ui.fact("Schedule", describeCron(job)),
+                                Ui.factMono("Timezone", job.zoneOrDefault().getId()),
+                                Ui.factMono("Expression", job.cron())),
+                        visitDisclosure(job, visits, model)));
+    }
 
-        return article(cls(classes), attr("data-job", job.id()),
-                div(cls("job__head"),
-                        div(cls("job__identity"),
-                                h3(cls("job__name"), text(job.id())),
-                                div(cls("job__chips"), runningChip, disabledChip, outcomeChip)),
-                        Ui.data(
-                                Ui.datum("Schedule", text(describeCron(job))),
-                                Ui.datum("Timezone", code(text(job.zoneOrDefault().getId()))),
-                                Ui.datum("Expression", code(text(job.cron()))),
-                                Ui.datum(running ? "Running for" : "Next run",
-                                        running ? elapsedTime(execution) : nextRunTime(upcoming))),
-                        div(cls("job__actions"),
-                                button(cls("btn btn--primary"), attr("type", "button"),
-                                        attr("data-run-job", job.id()),
-                                        attr("hidden", running ? "" : null),
-                                        attr("data-when", "idle"),
-                                        Ui.icon("play"), span(text("Run now"))),
-                                button(cls("btn btn--danger"), attr("type", "button"),
-                                        attr("data-cancel-job", job.id()),
-                                        attr("hidden", running ? null : ""),
-                                        attr("data-when", "running"),
-                                        Ui.icon("stop"), span(text("Cancel"))))),
-                visitDisclosure(job, visits, model));
+    private static Node jobState(JobConfig job, JobExecution execution, Optional<RunRecord> lastRun) {
+        if (execution != null) {
+            return Ui.liveState(phaseLabel(execution));
+        }
+        if (!job.isEnabled()) {
+            return Ui.state(Ui.Tone.SKIP, "disabled");
+        }
+        return lastRun.<Node>map(run -> Ui.state(run.status()))
+                .orElseGet(() -> Ui.state(Ui.Tone.NEUTRAL, "never run"));
+    }
+
+    /**
+     * The phase in the words an operator uses.
+     *
+     * <p>{@code CONFIGURATION} is where a join spends its time when a server pushes a resource
+     * pack, and "configuration" says nothing about the wait; "loading resources" does.
+     */
+    public static String phaseLabel(JobExecution execution) {
+        if (execution.isCancelled()) {
+            return "stopping";
+        }
+        return switch (execution.phase()) {
+            case CONNECTING -> "connecting";
+            case LOGIN -> "authenticating";
+            case CONFIGURATION -> "loading resources";
+            case JOINING -> "entering the world";
+            case IN_WORLD -> "in world";
+            case LEAVING -> "leaving";
+            case CLOSED -> "between visits";
+        };
+    }
+
+    /**
+     * The status mark for one job, as markup.
+     *
+     * <p>Handed to the browser inside the live snapshot rather than reconstructed there. The
+     * alternative is a second copy of the status vocabulary written in JavaScript, which is how
+     * two descriptions of the same thing start to disagree. It is only the status element that
+     * gets replaced this way — it contains nothing focusable and nothing that can be open, which
+     * is exactly why the rows around it are patched field by field instead.
+     */
+    public static String jobStatusHtml(JobConfig job, JobExecution execution, RunRecord lastRun) {
+        return jobState(job, execution, Optional.ofNullable(lastRun)).toHtml();
+    }
+
+    public static String jobRailClass(JobConfig job, JobExecution execution, RunRecord lastRun) {
+        if (execution != null) {
+            return Ui.Tone.LIVE.className();
+        }
+        if (!job.isEnabled()) {
+            return Ui.Tone.SKIP.className();
+        }
+        return lastRun == null ? Ui.Tone.NEUTRAL.className() : Ui.toneOf(lastRun.status()).className();
+    }
+
+    public static String accountStatusHtml(AccountStatus status) {
+        return accountState(status).toHtml();
+    }
+
+    public static String accountRailClass(AccountStatus status) {
+        return accountTone(status).className();
+    }
+
+    private static Ui.Tone accountTone(AccountStatus status) {
+        return status == null || status.isUsable() ? Ui.Tone.OK : Ui.Tone.WARN;
+    }
+
+    private static Node accountState(AccountStatus status) {
+        return Ui.state(accountTone(status), status == null
+                ? "unknown"
+                : status.state().toString().toLowerCase(Locale.ENGLISH).replace('_', ' '));
+    }
+
+    /**
+     * What a running job is doing right now.
+     *
+     * <p>Always in the document, closed when idle, because the script fills it in from the live
+     * stream and an element that has to be created before it can be updated is an element that is
+     * sometimes not there when the update arrives.
+     *
+     * <p>Wrapped in a reveal so it opens its own height instead of appearing at full size in one
+     * frame. The wrapper is what animates; the inner row is what gets clipped while it does.
+     */
+    private static Node liveLine(JobExecution execution, int visitCount) {
+        boolean running = execution != null;
+        int index = running ? execution.visitIndex() : 0;
+        int total = running && execution.visitCount() > 0 ? execution.visitCount() : visitCount;
+
+        return div(cls("reveal" + (running ? " is-shown" : "")), attr("data-job-live", ""),
+                // The inner box exists only to be the clip: it carries no padding of its own,
+                // because padding on it would keep a closed reveal a whole step tall.
+                div(cls("reveal__inner"),
+                        div(cls("live-line"),
+                                Ui.progress(Math.max(index - 1, 0), Math.max(total, 1)),
+                                div(cls("live-line__facts"),
+                                        span(cls("live-line__step"), attr("data-live-step", ""),
+                                                text(total > 0
+                                                        ? "visit " + Math.max(index, 1) + " of " + total
+                                                        : "")),
+                                        span(cls("live-line__where"), attr("data-live-where", ""),
+                                                text(running && execution.currentServer() != null
+                                                        ? execution.currentServer() : ""))))));
     }
 
     /** The elapsed clock shown while a job is running, counting up from when it started. */
@@ -293,11 +461,11 @@ public final class DashboardView {
 
         return details(cls("disclosure"), attr("data-remember", "job:" + job.id()),
                 summary(cls("disclosure__summary"),
-                        span(cls("disclosure__label"),
-                                text(count(visits.size(), "visit"))),
-                        Ui.tags(Node.each(visits.stream().map(VisitConfig::server).distinct().toList(),
-                                Ui::tagMono)),
-                        span(cls("disclosure__chevron"))),
+                        span(cls("disclosure__chevron"), Ui.icon("chevron")),
+                        span(cls("disclosure__label"), text(count(visits.size(), "visit"))),
+                        span(cls("disclosure__trail"),
+                                text(String.join(" → ", visits.stream()
+                                        .map(VisitConfig::server).distinct().toList())))),
                 ul(cls("visits"), Node.fragment(rows.toArray(Node[]::new))));
     }
 
@@ -312,24 +480,21 @@ public final class DashboardView {
         return li(cls("visit"),
                 span(cls("visit__index"), text(String.valueOf(index))),
                 div(cls("visit__body"),
-                        div(cls("visit__identity"),
-                                h3(cls("visit__server"), text(visit.server())),
-                                Ui.tags(
-                                        Ui.tagMono(server != null ? server.address() : "unknown"),
-                                        Ui.tag("as " + visit.account()))),
-                        Ui.data(
-                                Ui.datum("Stay", Durations.format(visit.stayForOrDefault())),
-                                Ui.datum("Protocol", server != null && server.protocol() != null
+                        h3(cls("visit__server"), text(visit.server())),
+                        Ui.facts(
+                                Ui.factMono("Address", server != null ? server.address() : "unknown"),
+                                Ui.factMono("Account", visit.account()),
+                                Ui.fact("Stay", Durations.format(visit.stayForOrDefault())),
+                                Ui.fact("Protocol", server != null && server.protocol() != null
                                         ? server.protocol() : "auto"),
-                                Ui.datum("Resource packs", settings != null
-                                        ? String.valueOf(settings.resourcePack().mode()) : "—"),
-                                Ui.datum("Ready when", settings != null ? readiness(settings) : "—"),
-                                Ui.datum("Secure chat", settings != null
-                                        ? String.valueOf(settings.secureChat()) : "—"),
-                                Ui.datum("Retries", (retry.retries() == null ? 0 : retry.retries())
-                                        + ", then " + String.valueOf(retry.then()).toLowerCase(
-                                        java.util.Locale.ENGLISH).replace('_', ' ')),
-                                Ui.datum("Gap after", Durations.format(visit.gapAfterOrDefault()))),
+                                Ui.fact("Resource packs", settings == null
+                                        ? "—" : lower(settings.resourcePack().mode())),
+                                Ui.fact("Ready when", settings != null ? readiness(settings) : "—"),
+                                Ui.fact("Secure chat", settings == null
+                                        ? "—" : lower(settings.secureChat())),
+                                Ui.fact("Retries", (retry.retries() == null ? 0 : retry.retries())
+                                        + ", then " + lower(retry.then())),
+                                Ui.fact("Gap after", Durations.format(visit.gapAfterOrDefault()))),
                         steps("On ready", visit.onReadyOrEmpty()),
                         steps("On leave", visit.onLeaveOrEmpty())));
     }
@@ -388,7 +553,7 @@ public final class DashboardView {
             note = "waits for " + action.waitFor().describe()
                     + ", up to " + Durations.format(action.waitFor().timeoutOrDefault())
                     + ", then " + String.valueOf(action.waitFor().onTimeoutOrDefault())
-                    .toLowerCase(java.util.Locale.ENGLISH);
+                    .toLowerCase(Locale.ENGLISH);
         } else if (action.delayAfter() != null && !action.delayAfter().isZero()) {
             note = "then waits " + Durations.format(action.delayAfter());
         }
@@ -403,60 +568,63 @@ public final class DashboardView {
 
     private static Node accounts(Model model) {
         List<AccountConfig> accounts = model.config().accountsOrEmpty();
-        return section(cls("panel"),
-                div(cls("panel__head"),
-                        h2(cls("panel__title"), text("Accounts")),
-                        span(cls("panel__note"),
-                                text("Microsoft sessions refresh themselves in the background; a "
-                                        + "sign-in is only needed after 90 days with the daemon off"))),
+        return band("accounts", "Accounts",
+                "Microsoft sessions refresh themselves in the background. A sign-in is only needed "
+                        + "after ninety days with the daemon off.",
                 accounts.isEmpty()
                         ? Ui.empty("No accounts configured.")
-                        : div(cls("accounts"), Node.each(accounts, account -> accountCard(model, account))));
+                        : div(cls("rows"), Node.each(accounts, account -> accountRow(model, account))));
     }
 
-    private static Node accountCard(Model model, AccountConfig account) {
+    private static Node accountRow(Model model, AccountConfig account) {
         AccountStatus status = model.accounts().get(account.id());
         boolean usable = status == null || status.isUsable();
         boolean microsoft = account.authOrDefault() == AccountConfig.AuthMode.MICROSOFT;
+        Ui.Tone tone = accountTone(status);
 
-        return article(cls("account" + (usable ? "" : " account--attention")),
+        return article(cls("row row--account" + (usable ? "" : " is-attention")),
                 attr("data-account", account.id()),
-                div(cls("account__head"),
-                        h3(cls("account__name"), text(account.id())),
-                        span(cls("chip " + (usable ? "chip--ok" : "chip--warn")),
-                                attr("data-account-state", ""),
-                                text(status == null ? "unknown" : status.state().toString()))),
-                Ui.dataCompact(
-                        Ui.datum("Username", code(text(status != null && status.username() != null
-                                ? status.username() : "—"))),
-                        Ui.datum("Type", microsoft ? "Microsoft" : "Offline"),
-                        status != null && status.tokenExpiry() != null
-                                ? Ui.datum("Token expires",
-                                Ui.relativeTime(status.tokenExpiry(), status.tokenExpiry().toString()))
-                                : Node.empty(),
-                        // The one that decides whether anyone has to sit down at a browser. Every
-                        // background refresh pushes it back out to ninety days, so on a running
-                        // daemon it should never be seen to fall.
-                        status != null && status.sessionExpiry() != null
-                                ? Ui.datum("Sign-in due",
-                                Ui.relativeTime(status.sessionExpiry(), status.sessionExpiry().toString()))
-                                : Node.empty()),
-                p(cls("account__note"), attr("data-account-detail", ""),
-                        text(status == null ? "" : status.detail())),
-                microsoft
-                        ? a(cls("btn account__action"),
-                        href("accounts/" + urlSegment(account.id()) + "/login"),
-                        Ui.icon("key"), span(text(usable ? "Re-authorise" : "Sign in")))
-                        : Node.empty());
+                span(cls("row__rail rail " + tone.className()), attr("data-account-rail", ""),
+                        attr("aria-hidden", "true"), span(cls("rail__node"))),
+                div(cls("row__main"),
+                        div(cls("row__head"),
+                                div(cls("row__identity"),
+                                        h3(cls("row__name"), text(account.id())),
+                                        div(cls("row__state"), attr("data-account-status", ""),
+                                                accountState(status))),
+                                microsoft
+                                        ? div(cls("row__actions"),
+                                        a(cls("link-action"),
+                                                href("accounts/" + urlSegment(account.id()) + "/login"),
+                                                span(text(usable ? "Re-authorise" : "Sign in")),
+                                                Ui.icon("arrow")))
+                                        : Node.empty()),
+                        Ui.facts(
+                                Ui.fact("Username", span(cls("fact__value--mono"),
+                                        attr("data-account-username", ""),
+                                        text(status != null && status.username() != null
+                                                ? status.username() : "—"))),
+                                Ui.fact("Type", microsoft ? "Microsoft" : "Offline"),
+                                status != null && status.tokenExpiry() != null
+                                        ? Ui.fact("Token expires",
+                                        Ui.relativeTime(status.tokenExpiry(), status.tokenExpiry().toString()))
+                                        : Node.empty(),
+                                // The one that decides whether anyone has to sit down at a browser.
+                                // Every background refresh pushes it back out to ninety days, so on
+                                // a running daemon it should never be seen to fall.
+                                status != null && status.sessionExpiry() != null
+                                        ? Ui.factStrong("Sign-in due",
+                                        Ui.relativeTime(status.sessionExpiry(), status.sessionExpiry().toString()))
+                                        : Node.empty()),
+                        p(cls("row__note"), attr("data-account-detail", ""),
+                                text(status == null ? "" : status.detail()))));
     }
 
     // ---------------------------------------------------------------- runs
 
     private static Node runs(Model model) {
-        return section(cls("panel"),
-                div(cls("panel__head"),
-                        h2(cls("panel__title"), text("Recent runs")),
-                        span(cls("panel__note"), text("newest first"))),
+        return band("runs", "History",
+                "Newest first. Every run is kept, including the ones that were stopped.",
                 div(attr("data-runs", ""), Node.raw(RunsView.render(model.runs()))));
     }
 
@@ -464,50 +632,58 @@ public final class DashboardView {
 
     /** Reference detail: true but rarely urgent, so it starts folded. */
     private static Node information(Model model) {
-        return section(cls("panel"),
-                details(cls("disclosure disclosure--standalone"), attr("data-remember", "info"),
+        long enabled = model.config().jobsOrEmpty().stream().filter(JobConfig::isEnabled).count();
+        long problems = model.runs().stream().filter(run -> run.status().isProblem()).count();
+
+        return band("information", "System", null,
+                details(cls("disclosure"), attr("data-remember", "info"),
                         summary(cls("disclosure__summary"),
-                                span(cls("disclosure__label"), text("Information")),
-                                span(cls("disclosure__chevron"))),
+                                span(cls("disclosure__chevron"), Ui.icon("chevron")),
+                                span(cls("disclosure__label"), text("Build and paths")),
+                                span(cls("disclosure__trail"),
+                                        text("Minecraft " + model.clientVersion()))),
                         div(cls("disclosure__body"),
-                                Ui.data(
-                                        Ui.datum("Minecraft", text(model.clientVersion())),
-                                        Ui.datum("Protocol", String.valueOf(model.clientProtocol())),
-                                        Ui.datum("Protocol translation", model.translationInstalled()
-                                                ? "Installed" : "Not installed"),
-                                        Ui.datum("Jobs enabled", model.config().jobsOrEmpty().stream()
-                                                .filter(JobConfig::isEnabled).count() + " of "
-                                                + model.config().jobsOrEmpty().size()),
-                                        Ui.datum("Servers",
+                                Ui.facts(
+                                        Ui.fact("Minecraft", model.clientVersion()),
+                                        Ui.factMono("Protocol", String.valueOf(model.clientProtocol())),
+                                        model.translationInstalled()
+                                                ? Ui.fact("Protocol translation", "Installed")
+                                                : Ui.factQuiet("Protocol translation", "Not installed"),
+                                        Ui.fact("Jobs enabled",
+                                                enabled + " of " + model.config().jobsOrEmpty().size()),
+                                        Ui.fact("Servers",
                                                 String.valueOf(model.config().serversOrEmpty().size())),
-                                        Ui.datum("State directory",
-                                                code(text(model.config().stateDirOrDefault().toString()))),
-                                        Ui.datum("Pack cache", code(text(model.config()
-                                                .stateDirOrDefault().resolve("packs").toString())))))));
+                                        Ui.fact("Runs with a problem",
+                                                problems + " of " + model.runs().size() + " kept"),
+                                        Ui.factMono("State directory",
+                                                model.config().stateDirOrDefault().toString()),
+                                        Ui.factMono("Pack cache", model.config()
+                                                .stateDirOrDefault().resolve("packs").toString())))));
     }
 
     // ---------------------------------------------------------------- dialog
 
     /**
-     * The cancel confirmation.
+     * The stop confirmation.
      *
      * <p>A native {@code <dialog>} rather than a hand-rolled overlay, so focus trapping, the
      * backdrop and dismissing on escape are the browser's job rather than another thing to get
      * subtly wrong. One instance is reused; the script fills in which job it is about.
      */
     private static Node cancelDialog() {
-        return net.anweisen.chronit.web.html.H.el("dialog", cls("sheet"), attr("data-cancel-dialog", ""),
+        return el("dialog", cls("sheet"), attr("data-cancel-dialog", ""),
                 div(cls("sheet__body"),
-                        span(cls("sheet__icon"), Ui.icon("stop")),
+                        Ui.rail(Ui.Tone.STOP),
                         h2(cls("sheet__title"), text("Stop this job?")),
                         p(cls("sheet__detail"),
-                                text("The client leaves the server it is on and the remaining "
-                                        + "visits are skipped. The run is still recorded.")),
+                                text("The client leaves the server it is on, the remaining visits "
+                                        + "are recorded as not reached, and the run is kept as "
+                                        + "stopped rather than failed.")),
                         p(cls("sheet__subject"), attr("data-cancel-subject", ""))),
                 div(cls("sheet__actions"),
                         button(cls("btn"), attr("type", "button"), attr("data-cancel-dismiss", ""),
                                 text("Keep running")),
-                        button(cls("btn btn--danger"), attr("type", "button"),
+                        button(cls("btn btn--stop"), attr("type", "button"),
                                 attr("data-cancel-confirm", ""),
                                 Ui.icon("stop"), span(text("Stop job")))));
     }

@@ -13,5 +13,9 @@ build/
 # Runtime data — tokens, state and cached resource packs must never be committed.
 /data/
 chronit.yml
+/chronit-app/build/libs/chronit.yml
 secrets.yml
 /test
+
+# Agent configs — untracked for now
+/.claude

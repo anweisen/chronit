@@ -67,7 +67,8 @@ A running job can be stopped from the dashboard. Cancelling disconnects the live
 client does — rather than dropping the socket and leaving the server to notice on its read timeout,
 which is what earns the next visit an "already logged in" kick — then interrupts the worker, which
 spends most of a run blocked on a sleep or a join. The visit in progress is recorded as *stopped*,
-the remaining visits are skipped, and the run still goes into the history.
+every visit after it as *not reached*, and the run goes into the history as *stopped* rather than as
+a failure.
 
 ## Scheduling: daemon or external cron
 
@@ -377,35 +378,131 @@ world at all and how long that took, how long it stayed, what it managed to run,
 it took, which protocol it spoke, and what ended it — the outcome named (`version refused`,
 `resource pack`, `auth failed`) rather than left as a message to interpret.
 
+### Five outcomes, not two
+
+A run is **complete**, **partial**, **failed**, **stopped** or **skipped**, and each visit within it
+is **ok**, **failed**, **stopped** or **not reached**. That is a deliberate replacement for the
+boolean it used to be, which collapsed situations that need different reactions: a job whose second
+of five servers was kicked is not a job that could not reach any of them, and neither is a job
+someone stopped on purpose. Presenting all three as *failed* is how a word stops being read.
+
+Two consequences are worth calling out. **Stopped is never coloured as a fault** — it gets its own
+cool tone and a pause mark, because an operator who pressed stop does not need to be alarmed about
+it. And **visits a stopped job never reached are recorded**, rather than being left out: a
+five-visit job that stopped after the second used to appear in the history as a two-visit job, with
+the three servers that were never contacted looking like they had never been configured. They now
+read *not reached*, and the run's tally says `1 of 2, 2 not reached`.
+
+The status is written into the history rather than worked out at display time, because "someone
+stopped this" is not recoverable from the visits alone — a job stopped during the gap between two
+successful visits is otherwise indistinguishable from one that finished. History written before the
+field existed still loads and derives the closest equivalent.
+
 ### One vocabulary
 
-Every page is assembled from the same two shapes. Secondary information is always a **labelled
-value** — a small capitalised label above its value — so `Europe/Berlin` is visibly a timezone and
-`10s` visibly a duration, rather than both being anonymous fragments in a run-on line. Anything
-genuinely list-like is a row of **chips**. Between them those cover every place a string of
-dot-separated text would otherwise appear, and because they are literally the same components, the
-same kind of information looks the same on the dashboard, in a run's detail, on the sign-in page and
-inside the confirmation dialog.
+The interface is built from four devices and nothing else. A **rail** — two pixels of colour with a
+node at its head — begins every job, account, run and notice, and is what makes the whole page look
+like one page. A **band** is a region whose name sits in the left margin instead of inside a
+container. A **state** is a drawn mark and a word in the colour of the thing it describes. And a
+**hairline** does all the separating that borders used to.
+
+Nothing is a card, and nothing is a filled capsule. A screen of cards is a screen of identical
+rectangles competing for the same attention, which leaves the thing that actually needs attention
+with nothing to stand out with; and a row of capsules reads as a row of buttons, at which point the
+eye stops telling them apart. Status is carried by the shape of its mark first — a check, a cross, a
+pause, a dash — so it survives being read by someone who cannot separate the two hues that matter
+most, with colour confirming rather than carrying.
+
+And **one table**. Every label-and-value pair anywhere on the page — a job's schedule, a visit's
+configuration, a run's per-visit record, the system information — is a row of the same aligned
+table: the label in a column of one fixed width, the value against it. So `Europe/Berlin` is visibly
+a timezone and `10s` visibly a duration rather than both being anonymous fragments in a run-on line,
+and, just as importantly, two unrelated blocks of facts line up with each other. A grid that reflows
+into two, three or four columns depending on the width available makes the reader hunt for each
+label before they can read its value, and nothing on the page aligns with anything else.
+
+The one exception is a collapsed summary, where a table is the wrong shape: there the same pairs sit
+on one line as a **meta strip**, in identical type, separated by hairlines. Nothing else anywhere
+lays out a label and a value.
+
+Run history is drawn as what it is: a single spine down the page with a node on it per run,
+expanding onto an indented spine of visits. Inside an expanded run, each visit is strictly one thing
+per line — who and how it went, then the record as a table, then the reason. Nothing sits beside
+anything else, because two blocks competing for the left edge of the same row give the eye two
+places to start and leave ragged space between them at most widths.
 
 The confirmation is a native `<dialog>`, so focus trapping, the backdrop and escape-to-dismiss are
 the browser's job rather than three more things to reimplement imperfectly.
 
 ### Layout and type
 
-The page opens as a short summary and expands into the whole configuration. There is no row of
-dashboard tiles: four equal boxes give a next-run time the same weight as an account that has
-stopped working, when only one of those needs a person. Instead the routine facts read as one line
-of prose, and anything actually waiting on you appears as a banner with the button that fixes it —
-rendered only when it applies.
+The page opens as one headline number — the next fire time, or the elapsed clock of whatever is
+running — and expands into the whole configuration. There is no row of dashboard tiles: four equal
+boxes give a next-run time the same weight as an account that has stopped working, when only one of
+those needs a person. Anything actually waiting on you appears with the action that fixes it, and
+only when it applies.
 
-Detail is present but folded. A job's visit chain and the system information sit behind
-disclosures, and which ones you left open is remembered, so watching one job does not mean
-re-opening it after every refresh.
+Detail is present but folded. A job's visit chain, each run's visits and the system information sit
+behind disclosures, and which ones you left open is remembered, so watching one job does not mean
+re-opening it every time something changes.
 
-Typography follows Apple's conventions: San Francisco where it exists and the platform's own UI
-face otherwise, a small set of named text styles rather than ad-hoc sizes, tracking that tightens
-as type grows and opens up for small capitalised labels, and tabular figures anywhere a number
-changes in place — without them a ticking countdown shifts its own width every second.
+Because the page is pushed to rather than reloaded, things arrive while you are looking at them, so
+nothing appears in a single frame. There are two devices and everything state-driven uses one of
+them, which is what stops a job starting from looking different to an account expiring. A **reveal**
+opens and closes its own height — the progress line under a running job is one — so the row settles
+rather than jumping. A **swap** is two controls sharing one grid cell: *Run now* and *Stop*
+cross-fade in place, so the row cannot resize under the pointer at the exact moment the button
+beneath it is being replaced. Content the server re-rendered lifts a hair and settles as it lands.
+All of it is skipped under `prefers-reduced-motion`.
+
+Three details make that work rather than nearly work. `display: none` cannot be transitioned at
+all, so a reveal animates `grid-template-rows` from `0fr` to `1fr`. A grid child collapsed to zero
+height still leaves the gap around it behind, so the space above a reveal lives *inside* it rather
+than being a gap belonging to the row. And that space has to be inside the clip rather than on it:
+a grid track's automatic minimum is the item's *outer* minimum, and `min-height: 0` does not cancel
+padding — so padding on the clipped element keeps a closed reveal a full step tall, which is
+invisible until a job row is set beside an account row and found a rem taller for no reason.
+
+One token, `--stack`, is the distance from a heading to the block beneath it, and every stack on
+the page uses it — a job, an account, a visit, a run's detail, an opened disclosure. They had
+drifted to four different values, which is the kind of difference a reader notices without being
+able to name it.
+
+Toasts sit in the bottom-left corner, on the gutter the rest of the page is aligned to, and arrive
+from the edge they are anchored to. Centred, they landed on top of whatever was being read.
+
+One superfamily in **three voices**, and which voice a piece of text gets depends on who is
+speaking rather than on whether it happens to be a sentence.
+
+| Voice | Face | Used for |
+| --- | --- | --- |
+| **Label** | Plex Mono, uppercase, tracked, tiny | Names a thing: a band, a fact, a step, a state |
+| **Note** | Plex Mono, sentence case, faint | The system reporting on itself — a band's description, an account's detail, why a visit ended, an empty state |
+| **Content** | Plex Sans | Everything read as the product speaking or as an answer: titles, values, the dialog's explanation, the sign-in instructions |
+
+The consequence worth stating: a label and its **value** are never the same voice — mono against
+sans — which is what makes a table scannable. A label and its **note** *are* the same voice at
+different weights, which is what makes the margin read as one object rather than two systems
+stacked. Machine tokens are the one place a value crosses over into mono: a path, a cron
+expression, an address, an identifier, where the exact characters matter and the reader may need to
+copy them.
+
+Half the notes on this page have a command inside them — "Account 'archive' has no stored session.
+Run: `chronit login archive`" — which is the clearest argument that the system's own reporting
+belongs in the system's own face. The two faces share a skeleton, so any switch reads as one voice
+changing register rather than as two fonts. Tabular figures everywhere a number changes in place,
+without which a ticking countdown shifts its own width every second.
+
+The fonts are **self-hosted** — three subsetted `woff2` files, 75 kB for the whole interface, served
+from `/assets/` like the stylesheet, with `font-src 'self'` in the policy. The rule was never "no
+webfont"; it was that this page must not phone anywhere, and it still doesn't. Plex is under the SIL
+Open Font License, and the licence ships beside the fonts at `/assets/PLEX-LICENSE.txt` because the
+OFL requires it to travel with them.
+
+Every foreground colour clears **4.5:1** against its background in both themes, measured rather than
+eyeballed. That matters more here than the ratio usually suggests: the labels are eleven-pixel
+uppercase mono, which is exactly the size at which a merely tasteful grey stops being legible. The
+faintest grey on the page is 6.3:1 in dark and 4.9:1 in light.
 
 ### How it is built
 
@@ -418,16 +515,34 @@ originates outside the process — server names, kick reasons, menu titles, chat
 content into a node is `text()`, which escapes, so the mistake is not available to make. Tests fire
 `<img src=x onerror=…>` through a kick reason to keep it that way.
 
-**The page does not reload.** A ~400 byte JSON snapshot is polled every six seconds and patches the
-few values that change; polling stops entirely while the tab is hidden. Countdowns tick locally from
-embedded timestamps, so staying current costs no requests at all. When the history changes, the
-*server-rendered* run fragment is fetched and swapped in — so there is still only one description of
-what a run looks like. Actions go through `fetch` and answer with a toast rather than a blind
-redirect.
+**The page is pushed to, not polled.** One `text/event-stream` connection to `/events` carries
+everything: a small JSON snapshot, and the *server-rendered* fragments for the summary and the run
+history — so there is still only one description of what a run looks like. The orchestrator itself
+drives it, so a job reaching the world, moving to its next server or being stopped appears in the
+moment it happens, and the live line under a running job names the phase it is in (`loading
+resources`, `entering the world`) rather than saying "running" for a minute and a half.
 
-The stylesheet and script are served as cacheable assets with a content-hashed URL and an ETag, so a
-poll never re-downloads them. Account status is cached briefly, because reading it parses a token
-file from disk and the dashboard asks often.
+Server-sent events rather than WebSockets, and that is a decision rather than a shortcut. The JDK's
+own HTTP server — which this is built on so the image does not carry a servlet container — offers no
+way to hand a request's socket over for a protocol upgrade, so a WebSocket would mean either a
+second listener on another port with its own authentication, or an embedded server and the several
+megabytes that come with it. Every byte here travels one way. In exchange the browser's own
+`EventSource` reconnects by itself, the session cookie authenticates the stream exactly as it
+authenticates every other request, and it is ordinary HTTP that a reverse proxy, `curl` and the
+network tab all understand.
+
+Each event carries absolute state rather than a delta, which is what makes the coalescing safe: a
+subscriber that cannot keep up is served the newest value of each event and never a backlog, and one
+that reconnects needs no replay. The top bar says whether the stream is actually connected, because
+on a page that no longer polls that is the one thing a reader cannot otherwise tell; a stream
+refused with a 401 sends the reader back to the sign-in form rather than blinking *offline* forever.
+Countdowns still tick locally from embedded timestamps, so staying current costs no requests at all.
+Actions go through `fetch` and answer with a toast rather than a blind redirect.
+
+The stylesheet and script are served as cacheable assets with a content-hashed URL and an ETag. A
+five-second sweep covers the few things that change without announcing themselves — a token
+refreshed in the background, a fire time passing — and it runs only while somebody is watching and
+publishes only when the picture has actually changed.
 
 ### Access
 

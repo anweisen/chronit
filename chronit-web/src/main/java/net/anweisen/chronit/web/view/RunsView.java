@@ -1,6 +1,8 @@
 package net.anweisen.chronit.web.view;
 
 import net.anweisen.chronit.core.state.RunRecord;
+import net.anweisen.chronit.core.state.RunStatus;
+import net.anweisen.chronit.core.state.VisitStatus;
 import net.anweisen.chronit.core.util.Durations;
 import net.anweisen.chronit.core.util.Redactor;
 import net.anweisen.chronit.web.html.Node;
@@ -16,22 +18,27 @@ import static net.anweisen.chronit.web.html.H.cls;
 import static net.anweisen.chronit.web.html.H.details;
 import static net.anweisen.chronit.web.html.H.div;
 import static net.anweisen.chronit.web.html.H.h3;
+import static net.anweisen.chronit.web.html.H.li;
+import static net.anweisen.chronit.web.html.H.ol;
 import static net.anweisen.chronit.web.html.H.p;
 import static net.anweisen.chronit.web.html.H.span;
 import static net.anweisen.chronit.web.html.H.summary;
 import static net.anweisen.chronit.web.html.H.text;
 
 /**
- * The run history.
+ * The run history, drawn as a timeline.
  *
- * <p>Rendered on its own so the browser can refetch just this part when a run finishes, instead of
- * reloading the page. Because it is still the server rendering it, there is only one description of
- * what a run looks like.
+ * <p>A list of runs is a chronology, so it is drawn as one: a single hairline down the page with a
+ * node on it for each run, coloured and shaped by how that run ended. Expanding a run puts its
+ * visits on an indented spine of their own. Nothing is boxed — the spine and the node carry the
+ * structure, which leaves colour free to mean status rather than decoration.
+ *
+ * <p>Rendered on its own so the live channel can push just this part when a run finishes, rather
+ * than reloading the page. Because it is still the server rendering it, there is only one
+ * description of what a run looks like.
  *
  * <p>Each visit answers the questions asked after a failure, in the order they get asked: did it
- * get in at all, how long did that take, what did it manage to do, and what ended it. Those are
- * labelled values rather than a run-on line, so the answer to any one of them can be found without
- * reading the others.
+ * get in at all, how long did that take, what did it manage to do, and what ended it.
  */
 public final class RunsView {
 
@@ -45,71 +52,99 @@ public final class RunsView {
         if (runs.isEmpty()) {
             return Ui.empty("Nothing has run yet. Use “Run now” on a job to try one.").toHtml();
         }
-        return div(cls("runs"), Node.each(runs, RunsView::run)).toHtml();
+        return ol(cls("timeline"), Node.each(runs, RunsView::run)).toHtml();
     }
 
     private static Node run(RunRecord record) {
-        boolean ok = record.succeeded();
-        boolean cancelled = record.visits().stream()
-                .anyMatch(visit -> "CANCELLED".equals(visit.outcome()));
-        long failed = record.visits().size() - record.successCount();
+        RunStatus status = record.status();
+        Ui.Tone tone = Ui.toneOf(status);
 
-        Ui.Tone tone = ok ? Ui.Tone.OK : cancelled ? Ui.Tone.NEUTRAL : Ui.Tone.BAD;
-        String label = ok ? "ok" : cancelled ? "stopped" : failed + " failed";
-
-        return details(cls("run"),
-                summary(cls("run__summary"),
-                        span(cls(("chip " + tone.className()).trim()), text(label)),
-                        h3(cls("run__job"), text(record.jobId())),
-                        span(cls("run__when"),
-                                Ui.relativeTime(record.startedAt(), absolute(record.startedAt()))),
-                        Ui.tags(
-                                Ui.tag(Durations.format(record.duration())),
-                                Ui.tag(record.visits().size() == 1
-                                        ? "1 visit" : record.visits().size() + " visits"),
-                                Ui.tag(record.trigger())),
-                        span(cls("disclosure__chevron"))),
-                div(cls("run__detail"), Node.each(record.visits(), RunsView::visit)));
+        return li(cls("tl tl--run " + tone.className()),
+                span(cls("tl__node"), attr("aria-hidden", "true")),
+                details(cls("tl__body"), attr("data-remember", "run:" + record.runId()),
+                        summary(cls("tl__summary"),
+                                div(cls("tl__head"),
+                                        h3(cls("tl__title"), text(record.jobId())),
+                                        Ui.state(status),
+                                        span(cls("tl__when"),
+                                                Ui.relativeTime(record.startedAt(),
+                                                        absolute(record.startedAt())))),
+                                Ui.meta(
+                                        Ui.metaItem("Took", Durations.format(record.duration())),
+                                        Ui.metaItem("Visits", tally(record)),
+                                        Ui.metaItem("Started by", record.trigger())),
+                                span(cls("disclosure__chevron"), Ui.icon("chevron"))),
+                        div(cls("tl__detail"),
+                                ol(cls("timeline timeline--nested"),
+                                        Node.each(record.visits(), RunsView::visit)))));
     }
 
+    /**
+     * How the visits went, in one phrase.
+     *
+     * <p>"3 of 5, 2 not reached" says considerably more than "5 visits", and it is the line that
+     * makes a stopped run legible at a glance: the run did some of its work, and the rest was never
+     * attempted rather than attempted and failed.
+     */
+    private static String tally(RunRecord record) {
+        long attempted = record.attemptedCount();
+        long skipped = record.skippedCount();
+        String core = record.successCount() + " of " + attempted;
+        return skipped == 0 ? core : core + ", " + skipped + " not reached";
+    }
+
+    /**
+     * One visit inside an expanded run.
+     *
+     * <p>Strictly one thing per line, top to bottom: who and how it went, then the record as an
+     * aligned table, then the reason if there is one. Nothing sits beside anything else. The
+     * previous arrangement put a heading row and a strip of pairs next to each other, which gave
+     * the eye two competing places to start and left ragged space between them at most widths.
+     */
     private static Node visit(RunRecord.VisitRecord visit) {
-        boolean cancelled = "CANCELLED".equals(visit.outcome());
-        boolean failed = !visit.success() && !cancelled;
+        VisitStatus status = visit.status();
+        Ui.Tone tone = Ui.toneOf(status);
+        boolean skipped = status == VisitStatus.SKIPPED;
 
-        Ui.Tone tone = visit.success() ? Ui.Tone.OK : cancelled ? Ui.Tone.NEUTRAL : Ui.Tone.BAD;
-        String label = visit.success() ? "ok" : cancelled ? "stopped" : "failed";
-
-        return div(cls("run__visit" + (failed ? " run__visit--failed" : "")),
-                div(cls("run__visit-head"),
-                        span(cls(("chip " + tone.className()).trim()), text(label)),
-                        h3(cls("run__visit-server"), text(visit.serverId())),
-                        Ui.tags(
-                                Ui.tag("as " + visit.accountId()),
+        return li(cls("tl tl--visit " + tone.className()),
+                span(cls("tl__node"), attr("aria-hidden", "true")),
+                div(cls("tl__body"),
+                        div(cls("tl__head"),
+                                h3(cls("tl__title"), text(visit.serverId())),
+                                Ui.state(status)),
+                        Ui.facts(
+                                Ui.factMono("Account", visit.accountId()),
+                                Ui.fact("Started", visit.startedAt() == null
+                                        ? "never" : absolute(visit.startedAt())),
+                                skipped ? Node.empty() : record(visit),
                                 visit.outcome() == null || visit.outcome().isBlank()
                                         ? Node.empty()
-                                        : Ui.tag(humanOutcome(visit.outcome())))),
+                                        : Ui.fact("Ended", humanOutcome(visit.outcome()))),
 
-                Ui.dataCompact(
-                        // Whether it got into the world at all is the first thing worth knowing,
-                        // and it separates "could not connect" from "connected and then failed".
-                        Ui.datum("Joined", visit.reachedTheWorld()
-                                ? "in " + Durations.format(visit.timeToReady())
-                                : "never"),
-                        Ui.datum(visit.reachedTheWorld() ? "Present" : "Gave up after",
-                                Durations.format(visit.duration())),
-                        Ui.datum("Actions", String.valueOf(visit.actionsRun())),
-                        Ui.datum("Attempts", String.valueOf(visit.attempts())),
-                        visit.protocolVersion() > 0
-                                ? Ui.datum("Protocol", visit.protocolVersion()
-                                + (visit.translated() ? ", translated" : ", native"))
-                                : Node.empty(),
-                        Ui.datum("Started", absolute(visit.startedAt()))),
+                        // A failure detail often quotes the action that failed, and the most likely
+                        // action to fail is a server login. Escaping alone would faithfully render
+                        // the password.
+                        visit.detail() == null || visit.detail().isBlank()
+                                ? Node.empty()
+                                : p(cls("tl__reason"), text(Redactor.redact(visit.detail())))));
+    }
 
-                // A failure detail often quotes the action that failed, and the most likely action
-                // to fail is a server login. Escaping alone would faithfully render the password.
-                visit.detail() == null || visit.detail().isBlank()
-                        ? Node.empty()
-                        : p(cls("run__reason"), text(Redactor.redact(visit.detail()))));
+    /** The measurements, in the order they get asked about after a failure. */
+    private static Node record(RunRecord.VisitRecord visit) {
+        return Node.fragment(
+                // Whether it got into the world at all is the first thing worth knowing, and it
+                // separates "could not connect" from "connected and then failed".
+                visit.reachedTheWorld()
+                        ? Ui.fact("Joined", "in " + Durations.format(visit.timeToReady()))
+                        : Ui.factQuiet("Joined", "never"),
+                Ui.fact(visit.reachedTheWorld() ? "Present" : "Gave up after",
+                        Durations.format(visit.duration())),
+                Ui.fact("Actions run", String.valueOf(visit.actionsRun())),
+                Ui.fact("Attempts", String.valueOf(visit.attempts())),
+                visit.protocolVersion() > 0
+                        ? Ui.fact("Protocol", visit.protocolVersion()
+                        + (visit.translated() ? ", translated" : ", native"))
+                        : Node.empty());
     }
 
     /** Turns the wire enum name into something readable without losing the distinction. */

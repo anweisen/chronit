@@ -21,6 +21,7 @@ import net.anweisen.chronit.core.driver.ResourcePackEvent;
 import net.anweisen.chronit.core.driver.ServerTarget;
 import net.anweisen.chronit.core.driver.SessionSettings;
 import net.anweisen.chronit.core.state.RunRecord;
+import net.anweisen.chronit.core.state.VisitStatus;
 import net.anweisen.chronit.core.util.Durations;
 import net.anweisen.chronit.core.util.Redactor;
 import org.slf4j.Logger;
@@ -64,14 +65,16 @@ public final class VisitRunner {
     }
 
     public RunRecord.VisitRecord run(VisitConfig visit) throws InterruptedException {
-        return run(visit, null);
+        return run(visit, null, 1);
     }
 
     /**
-     * @param execution the running job, so a cancel can reach the live session. Null for an ad-hoc
-     *                  visit that nothing can cancel
+     * @param execution  the running job, so a cancel can reach the live session and the dashboard
+     *                   can say what is happening. Null for an ad-hoc visit that nothing can cancel
+     * @param visitIndex one-based position in the job's visit chain, reported live
      */
-    public RunRecord.VisitRecord run(VisitConfig visit, JobExecution execution) throws InterruptedException {
+    public RunRecord.VisitRecord run(VisitConfig visit, JobExecution execution, int visitIndex)
+            throws InterruptedException {
         Instant startedAt = Instant.now();
         ServerConfig server = config.server(visit.server()).orElseThrow();
         AccountConfig account = config.account(visit.account()).orElseThrow();
@@ -91,40 +94,54 @@ public final class VisitRunner {
             // How many attempts actually happened, which is not the configured maximum when a
             // fatal failure stops the loop early.
             int attemptsMade = 0;
-            for (int attempt = 1; attempt <= attempts; attempt++) {
-                if (attempt > 1) {
-                    Duration backoff = retry.backoffFor(attempt - 1);
-                    log.info("Retrying {} (attempt {}/{}) in {}",
-                            server.id(), attempt, attempts, Durations.format(backoff));
-                    Thread.sleep(backoff.toMillis());
-                }
+            try {
+                for (int attempt = 1; attempt <= attempts; attempt++) {
+                    if (attempt > 1) {
+                        Duration backoff = retry.backoffFor(attempt - 1);
+                        log.info("Retrying {} (attempt {}/{}) in {}",
+                                server.id(), attempt, attempts, Durations.format(backoff));
+                        Thread.sleep(backoff.toMillis());
+                    }
 
-                attemptsMade = attempt;
-                Attempt result;
-                try {
-                    result = attemptVisit(visit, server, account, attempt, execution);
-                } catch (InterruptedException e) {
+                    attemptsMade = attempt;
+                    if (execution != null) {
+                        execution.beginVisit(visitIndex, server.id(), account.id(), attempt);
+                    }
+                    Attempt result = attemptVisit(visit, server, account, attempt, execution);
+
                     if (execution != null && execution.isCancelled()) {
+                        // A stop that landed inside the attempt: the session is already closed, and
+                        // reporting whatever the close looked like as a failure would be a lie.
                         return cancelledRecord(server, account, startedAt, attemptsMade);
                     }
+                    if (result.success()) {
+                        return new RunRecord.VisitRecord(server.id(), account.id(), startedAt,
+                                Duration.between(startedAt, Instant.now()), true, result.detail(),
+                                result.actionsRun(), attempt, result.protocolVersion(),
+                                result.translated(), result.timeToReady(), result.kind().name(),
+                                VisitStatus.SUCCEEDED);
+                    }
+                    failure = result.detail();
+                    lastTimeToReady = result.timeToReady();
+                    lastKind = result.kind();
+                    if (result.fatal()) {
+                        break;
+                    }
+                }
+            } catch (InterruptedException e) {
+                if (execution == null || !execution.isCancelled()) {
                     throw e;
                 }
-                if (result.success()) {
-                    return new RunRecord.VisitRecord(server.id(), account.id(), startedAt,
-                            Duration.between(startedAt, Instant.now()), true, result.detail(),
-                            result.actionsRun(), attempt, result.protocolVersion(), result.translated(),
-                            result.timeToReady(), result.kind().name());
-                }
-                failure = result.detail();
-                lastTimeToReady = result.timeToReady();
-                lastKind = result.kind();
-                if (result.fatal()) {
-                    break;
-                }
+                // The interrupt can arrive anywhere in here — mid-join, or in the backoff between
+                // two attempts, which is where a visit against an unreachable server spends most
+                // of its time. Catching it around the whole loop rather than around the attempt is
+                // what stops a stop during the backoff from losing the visit entirely and
+                // recording a server that was tried as one that was never reached.
+                return cancelledRecord(server, account, startedAt, attemptsMade);
             }
             return new RunRecord.VisitRecord(server.id(), account.id(), startedAt,
                     Duration.between(startedAt, Instant.now()), false, failure, 0, attemptsMade, -1,
-                    false, lastTimeToReady, lastKind.name());
+                    false, lastTimeToReady, lastKind.name(), VisitStatus.FAILED);
         }
     }
 
@@ -154,9 +171,9 @@ public final class VisitRunner {
     private static RunRecord.VisitRecord cancelledRecord(ServerConfig server, AccountConfig account,
                                                          Instant startedAt, int attemptsMade) {
         return new RunRecord.VisitRecord(server.id(), account.id(), startedAt,
-                Duration.between(startedAt, Instant.now()), false, "Cancelled by an operator",
+                Duration.between(startedAt, Instant.now()), false, "Stopped by an operator",
                 0, Math.max(1, attemptsMade), -1, false, null,
-                DisconnectInfo.Kind.CANCELLED.name());
+                DisconnectInfo.Kind.CANCELLED.name(), VisitStatus.CANCELLED);
     }
 
     private Attempt attemptVisit(VisitConfig visit, ServerConfig server, AccountConfig account,
@@ -222,7 +239,7 @@ public final class VisitRunner {
         try {
             client = driver.connect(
                     new ConnectRequest(target, auth, settings, plan.protocolVersion(), plan.translated()),
-                    new Events(chat, screens, server.id(), disconnect));
+                    new Events(chat, screens, server.id(), disconnect, execution));
         } catch (DriverException e) {
             return Attempt.fatal(e.getMessage(), DisconnectInfo.Kind.NETWORK);
         }
@@ -321,11 +338,26 @@ public final class VisitRunner {
         return disconnect != null ? disconnect.kind() : fallback;
     }
 
-    /** Bridges driver callbacks into the chat bus and the log. */
+    /** Bridges driver callbacks into the chat bus, the log, and the live job state. */
     private record Events(ChatBus chat,
                           ScreenBus screens,
                           String serverId,
-                          AtomicReference<DisconnectInfo> disconnect) implements ClientEvents {
+                          AtomicReference<DisconnectInfo> disconnect,
+                          JobExecution execution) implements ClientEvents {
+
+        /**
+         * The single most useful thing to show while a visit is in flight.
+         *
+         * <p>A join can sit in {@code CONFIGURATION} for half a minute behind a resource pack, and
+         * a dashboard that only says "running" for that whole time is indistinguishable from one
+         * that has stopped updating.
+         */
+        @Override
+        public void onPhase(net.anweisen.chronit.core.driver.Phase phase) {
+            if (execution != null) {
+                execution.reportPhase(phase);
+            }
+        }
 
         @Override
         public void onChat(ChatLine line) {

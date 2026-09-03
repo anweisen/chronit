@@ -125,6 +125,10 @@ public final class H {
         return el("ul", n);
     }
 
+    public static Element ol(Node... n) {
+        return el("ol", n);
+    }
+
     public static Element li(Node... n) {
         return el("li", n);
     }

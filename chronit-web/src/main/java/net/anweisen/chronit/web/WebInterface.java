@@ -11,6 +11,7 @@ import net.anweisen.chronit.core.config.AccountConfig;
 import net.anweisen.chronit.core.config.ChronitConfig;
 import net.anweisen.chronit.core.config.JobConfig;
 import net.anweisen.chronit.core.config.WebConfig;
+import net.anweisen.chronit.core.run.JobExecution;
 import net.anweisen.chronit.core.run.Orchestrator;
 import net.anweisen.chronit.core.run.Scheduler;
 import net.anweisen.chronit.core.state.RunRecord;
@@ -35,6 +36,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A small status and sign-in interface.
@@ -44,11 +49,15 @@ import java.util.concurrent.Executors;
  * typing it before it expires. A page with a button is a better answer to that than
  * {@code docker logs -f}.
  *
- * <p>Built on the JDK's own HTTP server — the whole interface is a few server-rendered pages and a
- * small JSON endpoint, and an embedded servlet container would add megabytes to the image for
- * nothing. Pages are rendered through a typed HTML builder rather than string concatenation,
- * because everything shown here (server names, kick reasons, menu titles) comes from outside the
- * process and a forgotten escape would be an injection hole.
+ * <p>Built on the JDK's own HTTP server — the whole interface is a few server-rendered pages, a
+ * small JSON endpoint and one event stream, and an embedded servlet container would add megabytes
+ * to the image for nothing. Pages are rendered through a typed HTML builder rather than string
+ * concatenation, because everything shown here (server names, kick reasons, menu titles) comes from
+ * outside the process and a forgotten escape would be an injection hole.
+ *
+ * <p>The page does not poll. {@link LiveFeed} pushes over server-sent events, driven by the
+ * orchestrator itself, so a job reaching the world or being stopped shows up in the moment it
+ * happens rather than up to six seconds later.
  */
 public final class WebInterface {
 
@@ -57,11 +66,17 @@ public final class WebInterface {
     private static final int RECENT_RUNS = 25;
 
     /**
-     * Account status reads parse a token file from disk. The dashboard polls, so without a short
-     * cache every poll would hit the filesystem once per account for information that changes a few
-     * times a year.
+     * Account status reads parse a token file from disk, so a short cache keeps the sweep below
+     * from touching the filesystem once per account per second.
      */
     private static final Duration STATUS_CACHE_TTL = Duration.ofSeconds(5);
+
+    /**
+     * Everything a run does announces itself, so this exists only for the things that change
+     * without anyone telling us: a token refreshed in the background, a fire time passing. It runs
+     * only while someone is actually watching, and publishes only when the snapshot differs.
+     */
+    private static final Duration SWEEP = Duration.ofSeconds(5);
 
     private static final String SESSION_COOKIE = "chronit_session";
 
@@ -77,10 +92,16 @@ public final class WebInterface {
     private final ObjectMapper json = new ObjectMapper();
 
     private final Assets assets = new Assets();
+    private final LiveFeed live = new LiveFeed();
     private volatile Map<String, AccountStatus> cachedStatuses = Map.of();
     private volatile Instant statusesFetchedAt = Instant.EPOCH;
+    /** The last thing published, so the sweep can stay quiet when nothing moved. */
+    private volatile String lastPublishedState = "";
+    private volatile long lastPublishedRunsVersion = Long.MIN_VALUE;
 
     private HttpServer server;
+    private ScheduledExecutorService sweeper;
+    private AutoCloseable orchestratorWatch;
 
     public WebInterface(ChronitConfig config,
                         Orchestrator orchestrator,
@@ -95,17 +116,24 @@ public final class WebInterface {
         this.orchestrator = orchestrator;
         this.scheduler = scheduler;
         this.accounts = accounts;
-        this.logins = new LoginFlows(accounts);
+        this.logins = new LoginFlows(accounts, this::publishLogin);
     }
 
     public void start() throws IOException {
         server = HttpServer.create(
                 new InetSocketAddress(webConfig.bindOrDefault(), webConfig.portOrDefault()), 0);
-        server.setExecutor(Executors.newFixedThreadPool(4, runnable -> {
+
+        // Each live stream occupies a thread for as long as the tab stays open, so a fixed pool of
+        // four would be exhausted by four browsers and stop serving pages entirely. The pool grows
+        // instead, and the feed itself caps how many streams it will accept.
+        ThreadPoolExecutor pool = new ThreadPoolExecutor(4, 64, 60L, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(), runnable -> {
             Thread thread = new Thread(runnable, "chronit-web");
             thread.setDaemon(true);
             return thread;
-        }));
+        });
+        pool.allowCoreThreadTimeOut(true);
+        server.setExecutor(pool);
 
         // Unauthenticated and reachable from anywhere, so it must never reveal anything.
         server.createContext("/healthz", exchange -> {
@@ -116,12 +144,32 @@ public final class WebInterface {
         server.createContext("/", this::route);
         server.start();
 
+        orchestratorWatch = orchestrator.watch(this::publishState);
+        sweeper = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "chronit-web-sweep");
+            thread.setDaemon(true);
+            return thread;
+        });
+        sweeper.scheduleWithFixedDelay(this::sweep, SWEEP.toSeconds(), SWEEP.toSeconds(), TimeUnit.SECONDS);
+
         log.info("Web interface on http://{}:{}{}",
                 webConfig.bindOrDefault(), webConfig.portOrDefault(),
                 requiresToken() ? " (token required)" : "");
     }
 
     public void stop() {
+        if (sweeper != null) {
+            sweeper.shutdownNow();
+        }
+        if (orchestratorWatch != null) {
+            try {
+                orchestratorWatch.close();
+            } catch (Exception e) {
+                log.debug("Could not detach the run listener: {}", e.toString());
+            }
+        }
+        // Ends the open streams before the server waits on them.
+        live.close();
         if (server != null) {
             server.stop(1);
         }
@@ -149,6 +197,12 @@ public final class WebInterface {
 
             if (path.equals("/") || path.isEmpty()) {
                 html(exchange, 200, DashboardView.render(dashboardModel(), assets.version()));
+                return;
+            }
+            // The live channel. Authorised by the same cookie every other request carries, checked
+            // above before the stream is opened rather than trusted for its lifetime.
+            if (path.equals("/events")) {
+                serveEvents(exchange);
                 return;
             }
             if (path.equals("/fragments/runs")) {
@@ -203,7 +257,9 @@ public final class WebInterface {
      *
      * <p>Compared in constant time. The token is deliberately not accepted as a query parameter:
      * that puts it in browser history, in any referrer the page emits, and in access logs. A
-     * browser gets it once through a form post and keeps it in an HttpOnly cookie afterwards.
+     * browser gets it once through a form post and keeps it in an HttpOnly cookie afterwards —
+     * which is also what authenticates the event stream, since {@code EventSource} cannot set
+     * headers but does send cookies on a same-origin request.
      */
     private boolean isAuthorised(HttpExchange exchange) {
         if (!requiresToken()) {
@@ -223,7 +279,8 @@ public final class WebInterface {
     }
 
     private void denyOrPrompt(HttpExchange exchange) throws IOException {
-        boolean wantsJson = exchange.getRequestURI().getPath().startsWith("/api/")
+        String path = exchange.getRequestURI().getPath();
+        boolean wantsJson = path.startsWith("/api/") || path.equals("/events")
                 || "application/json".equals(exchange.getRequestHeaders().getFirst("Accept"));
         if (wantsJson) {
             json(exchange, 401, "{\"error\":\"unauthorised\"}");
@@ -245,6 +302,80 @@ public final class WebInterface {
             return;
         }
         html(exchange, 401, LoginView.tokenGate(assets.version(), true));
+    }
+
+    // ------------------------------------------------------------------ live
+
+    /**
+     * Opens a stream and hands the caller's thread to it.
+     *
+     * <p>The first frames carry the current picture, so a page that has just reconnected is
+     * correct immediately rather than waiting for the next thing to happen.
+     */
+    private void serveEvents(HttpExchange exchange) throws IOException {
+        Map<String, String> initial = new LinkedHashMap<>();
+        initial.put("state", stateJson());
+        initial.put("overview", DashboardView.overviewFragment(dashboardModel()));
+        initial.put("runs", RunsView.render(recentRuns()));
+        String account = queryParam(exchange, "login");
+        if (account != null) {
+            initial.put("login", loginJson(account));
+        }
+        live.serve(exchange, initial);
+    }
+
+    /** Called by the orchestrator on every observable change, and by the sweep. */
+    private void publishState() {
+        try {
+            String state = stateJson();
+            // The snapshot carries a timestamp, so compare what actually matters instead.
+            if (!sameExceptTime(state, lastPublishedState)) {
+                lastPublishedState = state;
+                live.publish("state", state);
+                // The summary at the top is prose about the whole daemon, so it is rendered here
+                // rather than reassembled in the browser from the snapshot above.
+                live.publish("overview", DashboardView.overviewFragment(dashboardModel()));
+            }
+            long runsVersion = runsVersion();
+            if (runsVersion != lastPublishedRunsVersion) {
+                lastPublishedRunsVersion = runsVersion;
+                live.publish("runs", RunsView.render(recentRuns()));
+            }
+        } catch (RuntimeException e) {
+            log.warn("Could not publish a live update: {}", e.toString());
+        }
+    }
+
+    private void publishLogin(String accountId) {
+        statusesFetchedAt = Instant.EPOCH;
+        live.publish("login", loginJson(accountId));
+        publishState();
+    }
+
+    private void sweep() {
+        if (live.subscriberCount() == 0) {
+            return;
+        }
+        publishState();
+    }
+
+    /**
+     * Compares two snapshots ignoring the {@code now} field.
+     *
+     * <p>Without this the sweep would publish every five seconds forever, because the timestamp
+     * always differs — which is polling again, just with the roles reversed.
+     */
+    private static boolean sameExceptTime(String a, String b) {
+        return stripNow(a).equals(stripNow(b));
+    }
+
+    private static String stripNow(String snapshot) {
+        int start = snapshot.indexOf("\"now\":\"");
+        if (start < 0) {
+            return snapshot;
+        }
+        int end = snapshot.indexOf('"', start + 7);
+        return end < 0 ? snapshot : snapshot.substring(0, start) + snapshot.substring(end + 1);
     }
 
     // ------------------------------------------------------------------ pages
@@ -272,8 +403,8 @@ public final class WebInterface {
     }
 
     /**
-     * A counter that changes when the history does, so the browser can tell whether it needs to
-     * refetch the run list without downloading it every poll.
+     * A counter that changes when the history does, so a run list is only re-rendered and pushed
+     * when a run has actually been added.
      */
     private long runsVersion() {
         List<RunRecord> runs = recentRuns();
@@ -301,6 +432,12 @@ public final class WebInterface {
                     "No such Microsoft account".getBytes(StandardCharsets.UTF_8), null);
             return;
         }
+        // A finished flow from an earlier visit would otherwise greet whoever opens this page with
+        // the result of a sign-in they did not just perform.
+        logins.get(accountId)
+                .filter(flow -> flow.state() == LoginFlows.State.DONE
+                        || flow.state() == LoginFlows.State.FAILED)
+                .ifPresent(flow -> logins.clear(accountId));
         html(exchange, 200, LoginView.render(accountId, headerMeta(), assets.version()));
     }
 
@@ -315,18 +452,42 @@ public final class WebInterface {
         root.put("accountsNeedingLogin",
                 statuses.values().stream().filter(status -> !status.isUsable()).count());
 
+        Map<String, JobExecution> active = orchestrator.runningJobs();
+        root.put("running", active.size());
+
+        List<RunRecord> history = recentRuns();
         ArrayNode jobs = root.putArray("jobs");
-        Map<String, net.anweisen.chronit.core.run.JobExecution> active = orchestrator.runningJobs();
         for (Scheduler.Upcoming upcoming : scheduler.upcoming()) {
             ObjectNode job = jobs.addObject();
             job.put("id", upcoming.jobId());
             job.put("nextRun", upcoming.nextRun() == null ? null : upcoming.nextRun().toInstant().toString());
 
-            net.anweisen.chronit.core.run.JobExecution execution = active.get(upcoming.jobId());
+            JobExecution execution = active.get(upcoming.jobId());
             job.put("running", execution != null);
             job.put("startedAt", execution == null ? null : execution.startedAt().toString());
-            job.put("currentServer", execution == null ? null : execution.currentServer());
             job.put("cancelling", execution != null && execution.isCancelled());
+            // The live detail: which visit, on which server, and how far the join has got. This is
+            // the difference between "running" and knowing whether it is stuck on a resource pack.
+            job.put("currentServer", execution == null ? null : execution.currentServer());
+            job.put("currentAccount", execution == null ? null : execution.currentAccount());
+            job.put("visitIndex", execution == null ? 0 : execution.visitIndex());
+            job.put("visitCount", execution == null ? 0 : execution.visitCount());
+            job.put("attempt", execution == null ? 0 : execution.attempt());
+            job.put("phase", execution == null ? null : execution.phase().name());
+            job.put("phaseLabel", execution == null ? null : DashboardView.phaseLabel(execution));
+
+            RunRecord last = history.stream()
+                    .filter(run -> run.jobId().equals(upcoming.jobId()))
+                    .findFirst().orElse(null);
+            job.put("lastStatus", last == null ? null : last.status().name());
+
+            // The status mark, rendered here rather than rebuilt in the browser. See
+            // DashboardView.jobStatusHtml for why this one element travels as markup.
+            JobConfig configured = config.job(upcoming.jobId()).orElse(null);
+            job.put("statusHtml", configured == null
+                    ? null : DashboardView.jobStatusHtml(configured, execution, last));
+            job.put("railClass", configured == null
+                    ? null : DashboardView.jobRailClass(configured, execution, last));
         }
 
         ArrayNode accountsNode = root.putArray("accounts");
@@ -336,8 +497,13 @@ public final class WebInterface {
             account.put("state", status.state().toString());
             account.put("usable", status.isUsable());
             account.put("detail", status.detail());
+            account.put("username", status.username());
             account.put("sessionExpiry",
                     status.sessionExpiry() == null ? null : status.sessionExpiry().toString());
+            account.put("tokenExpiry",
+                    status.tokenExpiry() == null ? null : status.tokenExpiry().toString());
+            account.put("statusHtml", DashboardView.accountStatusHtml(status));
+            account.put("railClass", DashboardView.accountRailClass(status));
         });
 
         return root.toString();
@@ -400,27 +566,35 @@ public final class WebInterface {
             // The status read is now stale by definition.
             statusesFetchedAt = Instant.EPOCH;
         }
+        json(exchange, 200, loginJson(accountId));
+    }
 
+    /**
+     * The state of a device code login.
+     *
+     * <p>Unlike the old polling endpoint this does not clear a finished flow as a side effect of
+     * being read: with several listeners on the stream, whichever one read first would take the
+     * result and the others would be told the login had never happened. The flow is cleared when a
+     * new one starts instead.
+     */
+    private String loginJson(String accountId) {
         ObjectNode response = json.createObjectNode();
+        response.put("account", accountId);
         Optional<LoginFlows.Flow> flow = logins.get(accountId);
         if (flow.isEmpty()) {
             response.put("state", "IDLE");
-        } else {
-            LoginFlows.Flow current = flow.get();
-            response.put("state", current.state().toString());
-            response.put("message", current.message());
-            if (current.prompt() != null) {
-                response.put("userCode", current.prompt().userCode());
-                response.put("verificationUri", current.prompt().verificationUri());
-                response.put("directVerificationUri", current.prompt().directVerificationUri());
-                response.put("expiresAt", current.prompt().expiresAt().toString());
-            }
-            if (current.state() == LoginFlows.State.DONE || current.state() == LoginFlows.State.FAILED) {
-                logins.clear(accountId);
-                statusesFetchedAt = Instant.EPOCH;
-            }
+            return response.toString();
         }
-        json(exchange, 200, response.toString());
+        LoginFlows.Flow current = flow.get();
+        response.put("state", current.state().toString());
+        response.put("message", current.message());
+        if (current.prompt() != null) {
+            response.put("userCode", current.prompt().userCode());
+            response.put("verificationUri", current.prompt().verificationUri());
+            response.put("directVerificationUri", current.prompt().directVerificationUri());
+            response.put("expiresAt", current.prompt().expiresAt().toString());
+        }
+        return response.toString();
     }
 
     // ------------------------------------------------------------------ assets
@@ -438,8 +612,14 @@ public final class WebInterface {
             return;
         }
         exchange.getResponseHeaders().set("ETag", asset.etag());
-        // Safe to cache hard because the URL carries a content hash.
-        exchange.getResponseHeaders().set("Cache-Control", "public, max-age=31536000, immutable");
+        // The stylesheet and script are requested with a content hash in the query, so they can be
+        // cached hard. The fonts are named from inside the stylesheet and carry no hash, so they
+        // get a month and an ETag instead — a revalidation once a month costs a 304, and it means
+        // replacing a font eventually reaches everyone rather than never.
+        exchange.getResponseHeaders().set("Cache-Control",
+                exchange.getRequestURI().getQuery() != null
+                        ? "public, max-age=31536000, immutable"
+                        : "public, max-age=2592000");
         respond(exchange, 200, asset.contentType(), asset.bytes(), null);
     }
 
@@ -460,16 +640,23 @@ public final class WebInterface {
 
     private static void respond(HttpExchange exchange, int status, String contentType,
                                 byte[] body, String cacheControl) throws IOException {
-        exchange.getResponseHeaders().set("Content-Type", contentType + "; charset=utf-8");
+        // A charset on a font is meaningless — the bytes are not text — so it is only added to
+        // the types where it says something.
+        boolean textual = contentType.startsWith("text/") || contentType.endsWith("/json")
+                || contentType.endsWith("/javascript");
+        exchange.getResponseHeaders().set("Content-Type",
+                textual ? contentType + "; charset=utf-8" : contentType);
         if (cacheControl != null) {
             exchange.getResponseHeaders().set("Cache-Control", cacheControl);
         }
         exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
-        // Everything is served from this origin; nothing external is ever loaded.
+        // Everything is served from this origin; nothing external is ever loaded. connect-src
+        // covers the event stream as well as fetch.
         exchange.getResponseHeaders().set("Content-Security-Policy",
                 "default-src 'none'; style-src 'self'; script-src 'self' 'unsafe-inline'; "
-                        + "img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'");
+                        + "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+                        + "form-action 'self'; base-uri 'none'");
 
         exchange.sendResponseHeaders(status, body.length == 0 ? -1 : body.length);
         if (body.length > 0) {
@@ -493,6 +680,14 @@ public final class WebInterface {
             }
         }
         return Optional.empty();
+    }
+
+    private static String queryParam(HttpExchange exchange, String name) {
+        String query = exchange.getRequestURI().getRawQuery();
+        if (query == null) {
+            return null;
+        }
+        return formField(query, name).orElse(null);
     }
 
     private static Optional<String> formField(String body, String field) {
@@ -521,6 +716,14 @@ public final class WebInterface {
         Assets() {
             load("app.css", "text/css");
             load("app.js", "text/javascript");
+            // IBM Plex, self-hosted. A webfont, but still no external request: the point of the
+            // rule was never "no webfont", it was that this page must not phone anywhere.
+            // Seventy-five kilobytes for the whole interface, and the licence travels with them
+            // because the OFL requires it to.
+            load("plex-sans-var.woff2", "font/woff2");
+            load("plex-mono-400.woff2", "font/woff2");
+            load("plex-mono-500.woff2", "font/woff2");
+            load("PLEX-LICENSE.txt", "text/plain");
             // Hashed over every asset rather than taken from the front of their concatenated
             // etags: the first asset alphabetically would otherwise be the only one that could
             // move the token, so a change to app.js alone would keep the same URL — and these are

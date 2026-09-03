@@ -1,21 +1,29 @@
-/* chronit — dashboard behaviour.
+/* chronit — console behaviour.
  *
- * Deliberately small and dependency-free. The server renders the page; this only does three things
- * the server cannot:
+ * Dependency-free, and deliberately small. The server renders the page; this does four things the
+ * server cannot:
  *
- *   1. Ticks the "next run in 21h 6m" labels locally, so staying current costs no requests at all.
- *   2. Polls a tiny JSON snapshot and patches the handful of values that change, rather than
- *      reloading the page. Polling stops entirely while the tab is hidden.
- *   3. Runs actions through fetch so a click gives immediate feedback instead of a blind redirect.
+ *   1. Holds one event stream open and applies what arrives. Nothing is polled: a job reaching the
+ *      world, or being stopped, shows up in the moment it happens.
+ *   2. Ticks the "in 21h 6m" labels locally, so staying current costs no requests at all.
+ *   3. Runs actions through fetch, so a click gives immediate feedback rather than a blind
+ *      redirect — and then says nothing about the result, because the stream will.
+ *   4. Says, in the top bar, whether the stream is actually connected. On a page that no longer
+ *      polls that is the one thing a reader cannot otherwise tell.
  *
- * When the run history changes, the *server-rendered* fragment is fetched and swapped in. That way
- * there is only ever one place that knows how a run looks.
+ * Anything with a shape — a run, the summary at the top, a status mark — arrives as markup the
+ * server rendered. There is no second description of the design language in here.
  */
 (() => {
   'use strict';
 
-  const POLL_INTERVAL_MS = 6000;
   const TICK_INTERVAL_MS = 1000;
+  const RECONNECT_BASE_MS = 1000;
+  const RECONNECT_MAX_MS = 15000;
+
+  const loginAccount = document.body.dataset.loginAccount;
+  /** The sign-in page sits two segments deep; everything else is at the root. */
+  const ROOT = loginAccount ? '../../' : './';
 
   /* ------------------------------------------------------------------ theme */
 
@@ -30,7 +38,12 @@
   }
 
   function currentTheme() {
-    const stored = localStorage.getItem(THEME_KEY);
+    let stored = null;
+    try {
+      stored = localStorage.getItem(THEME_KEY);
+    } catch (error) {
+      /* Private browsing. The preference is a convenience, not a requirement. */
+    }
     if (stored) return stored;
     return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
@@ -39,7 +52,11 @@
     const toggle = event.target.closest('[data-theme-toggle]');
     if (!toggle) return;
     const next = currentTheme() === 'dark' ? 'light' : 'dark';
-    localStorage.setItem(THEME_KEY, next);
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch (error) {
+      /* Ignored, as above. */
+    }
     applyTheme(next);
   });
 
@@ -78,14 +95,22 @@
       : humanDuration(-deltaSeconds) + ' ago';
   }
 
+  function labelFor(element) {
+    const iso = element.getAttribute('datetime');
+    // An elapsed clock reads "20s", not "20s ago": the label beside it already says "Running for".
+    // A bare one is a headline number with its own words around it, so it takes no preposition.
+    if (element.hasAttribute('data-elapsed')) {
+      return humanDuration((Date.now() - Date.parse(iso)) / 1000);
+    }
+    if (element.hasAttribute('data-bare')) {
+      return humanDuration((Date.parse(iso) - Date.now()) / 1000);
+    }
+    return relativeLabel(iso);
+  }
+
   function tickTimes(root = document) {
     root.querySelectorAll('time[data-relative]').forEach((element) => {
-      // An elapsed clock reads "20s", not "20s ago": the label beside it already says
-      // "Running for", and the suffix would be reading the same word twice.
-      const elapsed = element.hasAttribute('data-elapsed');
-      const label = elapsed
-        ? humanDuration((Date.now() - Date.parse(element.getAttribute('datetime'))) / 1000)
-        : relativeLabel(element.getAttribute('datetime'));
+      const label = labelFor(element);
       if (label && element.textContent !== label) element.textContent = label;
     });
   }
@@ -157,111 +182,226 @@
       ...options,
     });
     if (!response.ok) {
-      throw new Error('HTTP ' + response.status);
+      const error = new Error('HTTP ' + response.status);
+      error.status = response.status;
+      throw error;
     }
     return response.json();
   }
 
-  /* ------------------------------------------------------------------ state */
+  /* ------------------------------------------------------------------ live stream */
 
-  const liveIndicator = document.querySelector('[data-live]');
-  let lastRunsVersion = Number(document.body.dataset.runsVersion || '0');
-  let failures = 0;
+  const linkState = document.querySelector('[data-live]');
+  const linkWord = document.querySelector('[data-live-word]');
+  let source = null;
+  let attempts = 0;
+  let reconnectTimer = null;
 
-  function setLiveState(state) {
-    if (liveIndicator) liveIndicator.dataset.state = state;
+  function setLink(state) {
+    if (linkState) linkState.dataset.state = state;
+    if (linkWord) linkWord.textContent = state;
   }
 
-  function applyJobState(jobs) {
-    jobs.forEach((job) => {
-      const card = document.querySelector('[data-job="' + CSS.escape(job.id) + '"]');
-      if (!card) return;
+  function eventsUrl() {
+    // The account is passed so the very first frame already carries the sign-in state, rather
+    // than the page showing a start button for a flow that is halfway through.
+    return ROOT + 'events'
+      + (loginAccount ? '?login=' + encodeURIComponent(loginAccount) : '');
+  }
 
-      card.classList.toggle('job--running', job.running);
+  function connect() {
+    clearTimeout(reconnectTimer);
+    setLink(attempts === 0 ? 'connecting' : 'reconnecting');
 
-      const badge = card.querySelector('[data-job-status]');
-      if (badge) badge.hidden = !job.running;
+    source = new EventSource(eventsUrl());
 
-      // Run and Cancel are the same slot: whichever applies is the one shown.
-      const run = card.querySelector('[data-when="idle"]');
-      const cancel = card.querySelector('[data-when="running"]');
-      if (run) run.hidden = job.running;
-      if (cancel) {
-        cancel.hidden = !job.running;
-        cancel.disabled = !!job.cancelling;
-        const label = cancel.querySelector('span');
-        if (label) label.textContent = job.cancelling ? 'Stopping…' : 'Cancel';
+    source.addEventListener('open', () => {
+      attempts = 0;
+      setLink('live');
+    });
+
+    source.addEventListener('state', (event) => {
+      applyState(JSON.parse(event.data));
+    });
+
+    source.addEventListener('overview', (event) => {
+      swap('[data-overview]', event.data);
+    });
+
+    source.addEventListener('runs', (event) => {
+      swap('[data-runs]', event.data);
+    });
+
+    source.addEventListener('login', (event) => {
+      const state = JSON.parse(event.data);
+      const host = document.querySelector('[data-login-state]');
+      if (host && (!loginAccount || state.account === loginAccount)) {
+        renderLogin(host, state, state.account || loginAccount);
       }
+    });
 
-      // While running, the datum counts up from the start; otherwise it counts down to the next
-      // fire time. Retarget whichever one is in the DOM.
-      const elapsed = card.querySelector('[data-job-elapsed]');
-      if (elapsed && job.startedAt && elapsed.getAttribute('datetime') !== job.startedAt) {
-        elapsed.setAttribute('datetime', job.startedAt);
-        elapsed.textContent = humanDuration((Date.now() - Date.parse(job.startedAt)) / 1000);
+    source.addEventListener('error', () => {
+      // A browser retrying on its own leaves the stream CONNECTING; it only reaches CLOSED when it
+      // has given up, which is what an HTTP error status does. That is the case worth handling,
+      // because the likeliest cause is a session that has expired.
+      if (source && source.readyState === EventSource.CONNECTING) {
+        setLink('reconnecting');
+        return;
       }
-      const next = card.querySelector('[data-job-next]');
-      if (next && job.nextRun && next.getAttribute('datetime') !== job.nextRun) {
-        next.setAttribute('datetime', job.nextRun);
-        next.textContent = relativeLabel(job.nextRun);
-      }
+      setLink('offline');
+      if (source) source.close();
+      source = null;
+      scheduleReconnect();
     });
   }
 
-  function applyAccountState(accounts) {
-    accounts.forEach((account) => {
-      const card = document.querySelector('[data-account="' + CSS.escape(account.id) + '"]');
-      if (!card) return;
-
-      card.classList.toggle('account--attention', !account.usable);
-
-      const chip = card.querySelector('[data-account-state]');
-      if (chip) {
-        chip.textContent = account.state;
-        chip.className = 'chip ' + (account.usable ? 'chip--ok' : 'chip--warn');
+  function scheduleReconnect() {
+    attempts += 1;
+    const delay = Math.min(RECONNECT_BASE_MS * 2 ** (attempts - 1), RECONNECT_MAX_MS);
+    reconnectTimer = setTimeout(async () => {
+      // Ask a plain endpoint what happened. A 401 means the cookie is no longer good, and the
+      // honest thing is to send the reader to the sign-in page rather than blink "offline" at
+      // them for ever.
+      try {
+        await requestJson(ROOT + 'api/state');
+      } catch (error) {
+        if (error.status === 401) {
+          location.reload();
+          return;
+        }
       }
-      const detail = card.querySelector('[data-account-detail]');
-      if (detail && detail.textContent !== account.detail) {
-        detail.textContent = account.detail;
-      }
-    });
+      connect();
+    }, delay);
   }
 
-  async function refreshRuns() {
-    const host = document.querySelector('[data-runs]');
-    if (!host) return;
-    const response = await fetch('fragments/runs', { credentials: 'same-origin' });
-    if (!response.ok) return;
-    host.innerHTML = await response.text();
+  /** Replaces a server-rendered region, keeping the disclosures the reader had open. */
+  function swap(selector, html) {
+    const host = document.querySelector(selector);
+    if (!host || host.innerHTML === html) return;
+    host.innerHTML = html;
     restoreDisclosures(host);
     tickTimes(host);
+    enter(host);
   }
 
-  async function poll() {
-    try {
-      const state = await requestJson('api/state');
-      failures = 0;
-      setLiveState('live');
+  /**
+   * Plays the entrance animation on content that was just replaced.
+   *
+   * Removing the class and reading a layout property forces the browser to finish the old
+   * animation before the new one is attached; without that read, adding a class that is already
+   * there does nothing at all and the second swap in a row appears instantly.
+   */
+  function enter(element) {
+    element.classList.remove('is-entering');
+    void element.offsetWidth;
+    element.classList.add('is-entering');
+  }
 
-      applyJobState(state.jobs || []);
-      applyAccountState(state.accounts || []);
+  /* ------------------------------------------------------------------ applying state */
 
-      const heroNext = document.querySelector('[data-hero-next]');
-      const soonest = (state.jobs || []).filter((j) => j.nextRun)
-        .sort((a, b) => Date.parse(a.nextRun) - Date.parse(b.nextRun))[0];
-      if (heroNext && soonest && heroNext.getAttribute('datetime') !== soonest.nextRun) {
-        heroNext.setAttribute('datetime', soonest.nextRun);
-        heroNext.textContent = relativeLabel(soonest.nextRun);
-      }
+  function applyState(state) {
+    (state.jobs || []).forEach(applyJob);
+    (state.accounts || []).forEach(applyAccount);
+  }
 
-      if (state.runsVersion !== lastRunsVersion) {
-        lastRunsVersion = state.runsVersion;
-        await refreshRuns();
-      }
-    } catch (error) {
-      failures += 1;
-      // One dropped poll is nothing; a run of them means the daemon is gone.
-      setLiveState(failures > 2 ? 'offline' : 'stale');
+  function applyJob(job) {
+    const card = document.querySelector('[data-job="' + CSS.escape(job.id) + '"]');
+    if (!card) return;
+
+    card.classList.toggle('is-running', job.running);
+
+    const rail = card.querySelector('[data-job-rail]');
+    if (rail && job.railClass) rail.className = 'row__rail rail ' + job.railClass;
+
+    const status = card.querySelector('[data-job-status]');
+    if (status && job.statusHtml && status.innerHTML !== job.statusHtml) {
+      status.innerHTML = job.statusHtml;
+      enter(status);
+    }
+
+    // Run and Stop share one slot: whichever applies is the one shown, and the other fades out of
+    // it rather than being removed, so the row does not resize under the pointer.
+    const run = card.querySelector('[data-when="idle"]');
+    const cancel = card.querySelector('[data-when="running"]');
+    if (run) run.classList.toggle('is-away', job.running);
+    if (cancel) {
+      cancel.classList.toggle('is-away', !job.running);
+      cancel.disabled = !!job.cancelling;
+      const label = cancel.querySelector('span');
+      if (label) label.textContent = job.cancelling ? 'Stopping…' : 'Stop';
+    }
+
+    applyLiveLine(card, job);
+
+    // While running, the datum counts up from the start; otherwise it counts down to the next
+    // fire time. Retarget whichever one is in the DOM.
+    const elapsed = card.querySelector('[data-job-elapsed]');
+    if (elapsed && job.startedAt && elapsed.getAttribute('datetime') !== job.startedAt) {
+      elapsed.setAttribute('datetime', job.startedAt);
+      elapsed.textContent = humanDuration((Date.now() - Date.parse(job.startedAt)) / 1000);
+    }
+    const next = card.querySelector('[data-job-next]');
+    if (next && job.nextRun && next.getAttribute('datetime') !== job.nextRun) {
+      next.setAttribute('datetime', job.nextRun);
+      next.textContent = relativeLabel(job.nextRun);
+    }
+  }
+
+  function applyLiveLine(card, job) {
+    const line = card.querySelector('[data-job-live]');
+    if (!line) return;
+    // A reveal, so it opens and closes its own height rather than blinking into existence.
+    line.classList.toggle('is-shown', job.running);
+    if (!job.running) return;
+
+    const total = job.visitCount || 0;
+    const index = job.visitIndex || 0;
+    const fill = line.querySelector('.progress__fill');
+    if (fill) {
+      const percent = total > 0 ? Math.min(100, Math.max(0, ((index - 1) / total) * 100)) : 0;
+      fill.style.width = percent + '%';
+    }
+    const bar = line.querySelector('[data-progress]');
+    if (bar) {
+      bar.setAttribute('aria-valuemax', String(total));
+      bar.setAttribute('aria-valuenow', String(Math.max(index - 1, 0)));
+    }
+
+    const step = line.querySelector('[data-live-step]');
+    if (step) {
+      const attempt = job.attempt > 1 ? ', attempt ' + job.attempt : '';
+      step.textContent = total > 0
+        ? 'visit ' + Math.max(index, 1) + ' of ' + total + attempt
+        : '';
+    }
+    const where = line.querySelector('[data-live-where]');
+    if (where) {
+      where.textContent = job.currentServer || '';
+    }
+  }
+
+  function applyAccount(account) {
+    const card = document.querySelector('[data-account="' + CSS.escape(account.id) + '"]');
+    if (!card) return;
+
+    card.classList.toggle('is-attention', !account.usable);
+
+    const rail = card.querySelector('[data-account-rail]');
+    if (rail && account.railClass) rail.className = 'row__rail rail ' + account.railClass;
+
+    const status = card.querySelector('[data-account-status]');
+    if (status && account.statusHtml && status.innerHTML !== account.statusHtml) {
+      status.innerHTML = account.statusHtml;
+      enter(status);
+    }
+    const detail = card.querySelector('[data-account-detail]');
+    if (detail && detail.textContent !== account.detail) {
+      detail.textContent = account.detail || '';
+    }
+    const username = card.querySelector('[data-account-username]');
+    if (username) {
+      const name = account.username || '—';
+      if (username.textContent !== name) username.textContent = name;
     }
   }
 
@@ -273,24 +413,25 @@
     event.preventDefault();
 
     const jobId = trigger.dataset.runJob;
+    const label = trigger.querySelector('span');
+    const original = label ? label.textContent : '';
     trigger.disabled = true;
-    const original = trigger.textContent;
-    trigger.textContent = 'Starting…';
+    if (label) label.textContent = 'Starting…';
 
     try {
-      const result = await requestJson('api/jobs/' + encodeURIComponent(jobId) + '/run',
+      const result = await requestJson(ROOT + 'api/jobs/' + encodeURIComponent(jobId) + '/run',
         { method: 'POST' });
       toast(result.message || ('Started ' + jobId), result.ok ? 'ok' : 'bad');
-      await poll();
     } catch (error) {
       toast('Could not start ' + jobId + ': ' + error.message, 'bad');
     } finally {
       trigger.disabled = false;
-      trigger.textContent = original;
+      if (label) label.textContent = original;
     }
+    // No refresh here on purpose: the run itself announces the change on the stream.
   });
 
-  /* ------------------------------------------------------------------ cancel */
+  /* ------------------------------------------------------------------ stopping */
 
   const dialog = document.querySelector('[data-cancel-dialog]');
   let pendingCancel = null;
@@ -331,14 +472,13 @@
     dialog.close();
 
     try {
-      const result = await requestJson('api/jobs/' + encodeURIComponent(jobId) + '/cancel',
+      const result = await requestJson(ROOT + 'api/jobs/' + encodeURIComponent(jobId) + '/cancel',
         { method: 'POST' });
       toast(result.message || ('Stopping ' + jobId), 'ok');
     } catch (error) {
       // A 409 means it finished between opening the dialog and confirming, which is not a fault.
       toast('Could not stop ' + jobId + ' — it may have already finished', 'bad');
     }
-    await poll();
   });
 
   document.addEventListener('click', async (event) => {
@@ -353,41 +493,25 @@
     }
   });
 
-  /* ------------------------------------------------------------------ login */
-
-  /** The page sits two segments deep, so the API sibling is reached from the root. */
-  function loginApiUrl(accountId) {
-    return '../../api/accounts/' + encodeURIComponent(accountId) + '/login';
-  }
-
-  async function pollLogin(accountId) {
-    const host = document.querySelector('[data-login-state]');
-    if (!host) return;
-
-    try {
-      const state = await requestJson(loginApiUrl(accountId));
-      renderLogin(host, state, accountId);
-      if (state.state === 'WAITING' || state.state === 'STARTING') {
-        setTimeout(() => pollLogin(accountId), 2000);
-      }
-    } catch (error) {
-      host.innerHTML = '';
-      const message = document.createElement('p');
-      message.className = 'login__lead';
-      message.textContent = 'Lost contact with chronit: ' + error.message;
-      host.appendChild(message);
-    }
-  }
+  /* ------------------------------------------------------------------ sign-in */
 
   /** Built with DOM calls rather than innerHTML so server-provided text cannot become markup. */
   function renderLogin(host, state, accountId) {
+    const previous = host.dataset.shown;
     host.innerHTML = '';
+    // Each step of the flow replaces the whole panel, so it settles in the same way every other
+    // swapped region does — but only when the step actually changed, or a stream reconnect would
+    // re-animate a code the reader is halfway through typing.
+    if (previous !== state.state) {
+      host.dataset.shown = state.state || '';
+      enter(host);
+    }
 
     if (state.state === 'IDLE') {
       // Nothing in progress. Offer to begin — this is the state a freshly opened page is in, and
       // omitting it is what previously made the page announce a failure that had not happened.
       const lead = document.createElement('p');
-      lead.className = 'login__lead';
+      lead.className = 'solo__lead';
       lead.textContent = 'Microsoft will show a short code to enter on any device with a browser.';
 
       const start = document.createElement('button');
@@ -404,7 +528,7 @@
       const spinner = document.createElement('div');
       spinner.className = 'spinner';
       const lead = document.createElement('p');
-      lead.className = 'login__lead';
+      lead.className = 'solo__lead';
       lead.textContent = 'Requesting a code from Microsoft…';
       host.append(spinner, lead);
       return;
@@ -412,7 +536,7 @@
 
     if (state.state === 'WAITING') {
       const lead = document.createElement('p');
-      lead.className = 'login__lead';
+      lead.className = 'solo__lead';
       lead.textContent = 'Enter this code on the Microsoft sign-in page.';
 
       const code = document.createElement('div');
@@ -420,7 +544,7 @@
       code.textContent = state.userCode;
 
       const actions = document.createElement('div');
-      actions.className = 'login__actions';
+      actions.className = 'solo__actions';
 
       const open = document.createElement('a');
       open.className = 'btn btn--primary btn--lg';
@@ -438,7 +562,7 @@
       actions.append(open, copy);
 
       const note = document.createElement('p');
-      note.className = 'login__note';
+      note.className = 'solo__note';
       note.textContent = 'Waiting for you to finish. The code expires '
         + relativeLabel(state.expiresAt) + '.';
 
@@ -448,7 +572,7 @@
 
     if (state.state === 'DONE') {
       const done = document.createElement('p');
-      done.className = 'login__lead';
+      done.className = 'solo__lead';
       done.textContent = 'Signed in.' + (state.message ? ' ' + state.message : '');
       const back = document.createElement('a');
       back.className = 'btn btn--primary btn--lg';
@@ -459,7 +583,7 @@
     }
 
     const failed = document.createElement('p');
-    failed.className = 'login__lead';
+    failed.className = 'solo__lead is-bad';
     failed.textContent = state.message || 'Sign-in failed.';
     const retry = document.createElement('button');
     retry.className = 'btn btn--lg';
@@ -471,18 +595,18 @@
 
   document.addEventListener('click', (event) => {
     const start = event.target.closest('[data-start-login]');
-    if (start) {
-      event.preventDefault();
-      startLogin(start.dataset.startLogin);
-    }
+    if (!start) return;
+    event.preventDefault();
+    startLogin(start.dataset.startLogin);
   });
 
   async function startLogin(accountId) {
     const host = document.querySelector('[data-login-state]');
     if (host) renderLogin(host, { state: 'STARTING' }, accountId);
     try {
-      await requestJson(loginApiUrl(accountId), { method: 'POST' });
-      pollLogin(accountId);
+      // The result is ignored: every step of the flow arrives on the stream from here on.
+      await requestJson(ROOT + 'api/accounts/' + encodeURIComponent(accountId) + '/login',
+        { method: 'POST' });
     } catch (error) {
       toast('Could not start sign-in: ' + error.message, 'bad');
     }
@@ -490,36 +614,27 @@
 
   /* ------------------------------------------------------------------ start */
 
-  applyTheme(localStorage.getItem(THEME_KEY));
+  applyTheme((() => {
+    try {
+      return localStorage.getItem(THEME_KEY);
+    } catch (error) {
+      return null;
+    }
+  })());
   restoreDisclosures();
   tickTimes();
   setInterval(tickTimes, TICK_INTERVAL_MS);
 
-  const loginAccount = document.body.dataset.loginAccount;
-  if (loginAccount) {
-    pollLogin(loginAccount);
-  }
+  if (document.body.dataset.dashboard === 'true' || loginAccount) {
+    connect();
 
-  if (document.body.dataset.dashboard === 'true') {
-    let timer = null;
-
-    function schedulePoll() {
-      clearInterval(timer);
-      timer = setInterval(poll, POLL_INTERVAL_MS);
-    }
-
-    // A hidden tab has nobody looking at it; polling it just burns the daemon's time.
+    // Coming back to a tab that was asleep: the browser may have quietly dropped the connection
+    // while it was hidden, and reconnecting is cheaper than wondering.
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        clearInterval(timer);
-        timer = null;
-      } else {
-        poll();
-        schedulePoll();
+      if (!document.hidden && !source) {
+        attempts = 0;
+        connect();
       }
     });
-
-    poll();
-    schedulePoll();
   }
 })();

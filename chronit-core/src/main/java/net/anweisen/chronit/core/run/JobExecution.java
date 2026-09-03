@@ -1,6 +1,8 @@
 package net.anweisen.chronit.core.run;
 
 import net.anweisen.chronit.core.driver.ClientHandle;
+import net.anweisen.chronit.core.driver.Phase;
+import net.anweisen.chronit.core.util.Durations;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * A job that is currently running, and the handle used to stop it.
+ * A job that is currently running: what it is doing right now, and the handle used to stop it.
  *
  * <p>Stopping needs two things to happen, and doing only one leaves the job half-dead. The worker
  * thread spends most of its life blocked — sleeping between actions, waiting out a {@code stayFor},
@@ -20,6 +22,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * visit.
  *
  * <p>So cancelling disconnects first, then interrupts.
+ *
+ * <p>It also carries the live progress the dashboard shows. Every field that changes calls the
+ * change signal, which is what pushes an update to connected browsers — a job moving from
+ * {@code CONFIGURATION} to {@code IN_WORLD} appears immediately rather than on the next poll.
  */
 public final class JobExecution {
 
@@ -29,16 +35,27 @@ public final class JobExecution {
     private final String trigger;
     private final Instant startedAt;
     private final Thread worker;
+    private final int visitCount;
+    private final Runnable onChange;
 
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicReference<ClientHandle> activeClient = new AtomicReference<>();
     private volatile String currentServer;
+    private volatile String currentAccount;
+    private volatile int visitIndex;
+    private volatile int attempt = 1;
+    private volatile Phase phase = Phase.CONNECTING;
+    /** True between the start of a visit and the teardown of its session. */
+    private volatile boolean live;
 
-    JobExecution(String jobId, String trigger, Thread worker) {
+    JobExecution(String jobId, String trigger, Thread worker, int visitCount, Runnable onChange) {
         this.jobId = jobId;
         this.trigger = trigger;
         this.startedAt = Instant.now();
         this.worker = worker;
+        this.visitCount = visitCount;
+        this.onChange = onChange == null ? () -> {
+        } : onChange;
     }
 
     public String jobId() {
@@ -62,6 +79,29 @@ public final class JobExecution {
         return currentServer;
     }
 
+    public String currentAccount() {
+        return currentAccount;
+    }
+
+    /** One-based position in the visit chain, or 0 before the first visit starts. */
+    public int visitIndex() {
+        return visitIndex;
+    }
+
+    public int visitCount() {
+        return visitCount;
+    }
+
+    /** Which retry of the current visit is in flight, counting from one. */
+    public int attempt() {
+        return attempt;
+    }
+
+    /** How far the live session has got. The single most useful thing to show while waiting. */
+    public Phase phase() {
+        return phase;
+    }
+
     public boolean isCancelled() {
         return cancelled.get();
     }
@@ -75,7 +115,8 @@ public final class JobExecution {
         if (!cancelled.compareAndSet(false, true)) {
             return false;
         }
-        log.info("Cancelling job '{}' after {}", jobId, net.anweisen.chronit.core.util.Durations.format(elapsed()));
+        log.info("Cancelling job '{}' after {}", jobId, Durations.format(elapsed()));
+        onChange.run();
 
         ClientHandle client = activeClient.get();
         if (client != null) {
@@ -91,15 +132,44 @@ public final class JobExecution {
         return true;
     }
 
+    /** Announces which visit is about to be attempted, before anything can block. */
+    void beginVisit(int index, String serverId, String accountId, int attempt) {
+        this.visitIndex = index;
+        this.currentServer = serverId;
+        this.currentAccount = accountId;
+        this.attempt = attempt;
+        this.phase = Phase.CONNECTING;
+        this.live = true;
+        onChange.run();
+    }
+
+    /**
+     * Reports how far the live session has got.
+     *
+     * <p>Ignored once the visit has been detached. A driver still emits {@code LEAVING} and
+     * {@code CLOSED} as it tears the socket down, and accepting those would walk the phase
+     * backwards after the visit had already finished — the dashboard would show a job that had
+     * moved on to waiting still apparently leaving the server it had left.
+     */
+    void reportPhase(Phase phase) {
+        if (live && this.phase != phase) {
+            this.phase = phase;
+            onChange.run();
+        }
+    }
+
     /** Registers the session currently in use, so cancelling can close it. */
     void attach(ClientHandle client, String serverId) {
         activeClient.set(client);
         currentServer = serverId;
+        onChange.run();
     }
 
     void detach() {
         activeClient.set(null);
-        currentServer = null;
+        live = false;
+        phase = Phase.CLOSED;
+        onChange.run();
     }
 
     /**
