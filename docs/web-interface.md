@@ -38,8 +38,10 @@ container. A **state** is a drawn mark and a word in the colour of the thing it 
 Nothing is a card and nothing is a filled capsule. A screen of cards is a screen of identical
 rectangles competing for the same attention, which leaves the thing that needs attention with
 nothing to stand out against, and a row of capsules reads as a row of buttons. Status is carried by
-the shape of its mark first (a check, a cross, a pause, a dash), so it survives a reader who cannot
-separate the two hues that matter most, with colour confirming rather than carrying.
+the shape of its mark first (a check, a cross, a pause, a dash, an open ring for anything at rest),
+so it survives a reader who cannot separate the two hues that matter most, with colour confirming
+rather than carrying. The dash means a visit a run never reached, so a disabled job takes the open
+ring instead: it was not passed over, it is simply not scheduled.
 
 Every label-and-value pair anywhere on the page, whether it is a job's schedule, a visit's
 configuration, a run's per-visit record or the system information, is a row of the same aligned
@@ -52,10 +54,12 @@ The one exception is a collapsed summary, where a table is the wrong shape. Ther
 on one line as a **meta strip**, in identical type, separated by hairlines. Nothing else anywhere
 lays out a label and a value.
 
-Run history is drawn as what it is: a single spine down the page with a node per run, expanding onto
-an indented spine of visits. Inside an expanded run, each visit is strictly one thing per line, so
-who and how it went, then the record as a table, then the reason. Nothing sits beside anything else,
-because two blocks competing for the left edge of a row give the eye two places to start.
+Run history is drawn as what it is: a single spine down the page with a node per run. Opening a run
+hangs its visits on that same line rather than starting a second one beside it, with smaller nodes
+and their text set a step further in, so the hierarchy is carried by where the content begins.
+Inside an expanded run each visit is strictly one thing per line, so who and how it went, then the
+record as a table, then the reason. Nothing sits beside anything else, because two blocks competing
+for the left edge of a row give the eye two places to start.
 
 The confirmation is a native `<dialog>`, so focus trapping, the backdrop and escape-to-dismiss are
 the browser's job.

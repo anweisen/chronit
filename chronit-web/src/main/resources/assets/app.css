@@ -497,12 +497,24 @@ svg {
   gap: 2.5rem;
 }
 
+/* The summary and the notice beneath it are two regions, pushed on two events, because one of
+ * them holds a clock and the other one does not. */
+.overview__grid {
+  display: grid;
+  gap: 2.5rem;
+}
+
+/* No notice, no row and no gap: an empty wrapper left behind would still take its share of the
+ * stack above. */
+.overview__notice:empty {
+  display: none;
+}
+
 @media (min-width: 52rem) {
-  .overview {
+  .overview__grid {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: end;
   }
-  .overview .alert { grid-column: 1 / -1; }
 }
 
 .overview__eyebrow {
@@ -1068,18 +1080,27 @@ details[open] > .tl__summary .disclosure__chevron {
 /* ---------------------------------------------------------------- timeline */
 
 .timeline {
+  --node: 7px;
+  /* Centre of the spine, and therefore of every node hung on it. */
+  --spine: 3.5px;
+  /* Half the line box of a headline (0.9375rem at 1.4), so a node sits on the middle of the text
+   * beside it rather than on the middle of nothing. */
+  --headline: 0.7em;
+  /* Whatever separates the top of a row from that headline. */
+  --lead-pad: 0.9rem;
   list-style: none;
   margin: 0;
   padding: 0;
   position: relative;
 }
 
-/* The spine. Inset at both ends so it starts and stops at the first and last node rather than
- * running off into the hairline above. */
+/* The spine. One line down the whole history — runs and, once a run is open, its visits too.
+ * Inset at both ends so it starts and stops at the first and last node rather than running off
+ * into the hairline above. */
 .timeline::before {
   content: "";
   position: absolute;
-  left: 3px;
+  left: calc(var(--spine) - 0.5px);
   top: 1.1rem;
   bottom: 1.1rem;
   width: 1px;
@@ -1098,13 +1119,16 @@ details[open] > .tl__summary .disclosure__chevron {
 
 .tl__node {
   position: absolute;
-  left: 0;
-  top: 1.05rem;
-  width: 7px;
-  height: 7px;
+  left: calc(var(--spine) - var(--node) / 2);
+  /* Centred on its headline, not on the row: the row includes a table and a reason underneath, so
+   * centring on that would float the node somewhere in the middle of the text. */
+  top: calc(var(--lead-pad) + var(--headline) - var(--node) / 2);
+  width: var(--node);
+  height: var(--node);
   border-radius: 50%;
   background: var(--bg);
   border: 1.5px solid var(--tone, var(--fg-faint));
+  /* Punches a hole in the spine so the line appears to pass behind the node, not through it. */
   box-shadow: 0 0 0 3px var(--bg);
 }
 
@@ -1113,8 +1137,11 @@ details[open] > .tl__summary .disclosure__chevron {
   background: var(--tone);
 }
 
+/* A node that was never reached is drawn faintly rather than with a dotted ring, which at five
+ * pixels across renders as a broken circle rather than a deliberate one. The dash in its state
+ * mark is what says "not reached"; the node only has to be present and quiet. */
 .tl.is-skip .tl__node {
-  border-style: dotted;
+  border-color: color-mix(in srgb, var(--tone) 55%, transparent);
 }
 
 /* Stacked, never side by side: the identity line, then the summary pairs. Two blocks competing
@@ -1159,21 +1186,40 @@ details[open] > .tl__summary .disclosure__chevron {
   padding: 0.25rem 0 1.25rem;
 }
 
+/* Opening a run reveals its visits; they arrive rather than appear, like every other block the
+ * state puts on screen. */
+details[open] > .tl__detail {
+  animation: enter var(--reveal) var(--ease);
+}
+
+/* The visits hang on the *same* spine as the runs. The nested list is pulled back by exactly the
+ * indent its parent applied, which lands its nodes on the one line already running down the page;
+ * without that it drew a second line of its own alongside the first, and two parallel rules is
+ * one rule too many.
+ *
+ * Their content is then indented a step further than a run's, so the hierarchy is carried by where
+ * the text starts rather than by a duplicate spine. */
+.timeline--nested {
+  margin-left: -1.6rem;
+}
+
+.timeline--nested::before {
+  content: none;
+}
+
 .tl--visit {
+  /* A smaller node: same shape and same line, visibly subordinate. */
+  --node: 5px;
+  /* The li's own padding is what precedes this headline, so the node follows it. */
+  --lead-pad: 0.6rem;
+  padding-left: 2.4rem;
   padding-top: 0.6rem;
   padding-bottom: 0.9rem;
 }
 
-.tl--visit .tl__node { top: 0.75rem; }
-
 .tl--visit .tl__body {
   display: grid;
   gap: var(--stack);
-}
-
-.timeline--nested::before {
-  top: 0.9rem;
-  bottom: 0.9rem;
 }
 
 .tl__reason {

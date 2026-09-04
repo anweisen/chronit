@@ -102,7 +102,14 @@ public final class DashboardView {
         return Doc.page("chronit", model.headerMeta(), assetVersion, "./",
                 List.of(attr("data-dashboard", "true")),
                 main(cls("page"),
-                        section(cls("overview"), attr("data-overview", ""), overview(model)),
+                        section(cls("overview"),
+                                div(cls("overview__grid"), attr("data-overview", ""), overview(model)),
+                                // Its own region, pushed on its own event. It used to sit inside
+                                // the block above, which carries a clock that changes every
+                                // second — so every job update re-rendered a notice whose text
+                                // had not changed, and it flickered.
+                                div(cls("overview__notice"), attr("data-attention", ""),
+                                        attention(model))),
                         jobs(model),
                         accounts(model),
                         runs(model),
@@ -119,6 +126,17 @@ public final class DashboardView {
      */
     public static String overviewFragment(Model model) {
         return overview(model).toHtml();
+    }
+
+    /**
+     * The "an account needs signing in" notice, pushed separately from the summary above it.
+     *
+     * <p>It changes a few times a year; the summary beside it contains a clock. Sharing one
+     * fragment meant the notice was rewritten every time a running job reported a new phase, and
+     * rewriting it is what made it blink.
+     */
+    public static String attentionFragment(Model model) {
+        return attention(model).toHtml();
     }
 
     // ---------------------------------------------------------------- overview
@@ -179,8 +197,7 @@ public final class DashboardView {
                         Ui.figure(needingLogin == 0
                                         ? text(String.valueOf(model.accounts().size()))
                                         : span(cls("is-warn"), text(needingLogin + "/" + model.accounts().size())),
-                                needingLogin == 0 ? "accounts" : "need signing in")),
-                attention(model));
+                                needingLogin == 0 ? "accounts" : "need signing in")));
     }
 
     /** "1 job" but "2 jobs" — the kind of detail whose absence is immediately noticeable. */
@@ -268,7 +285,7 @@ public final class DashboardView {
         List<VisitConfig> visits = job.visits() == null ? List.of() : job.visits();
 
         Ui.Tone tone = running ? Ui.Tone.LIVE
-                : !job.isEnabled() ? Ui.Tone.SKIP
+                : !job.isEnabled() ? Ui.Tone.NEUTRAL
                 : lastRun.map(run -> Ui.toneOf(run.status())).orElse(Ui.Tone.NEUTRAL);
 
         return article(cls("row row--job" + (running ? " is-running" : "")
@@ -320,7 +337,10 @@ public final class DashboardView {
             return Ui.liveState(phaseLabel(execution));
         }
         if (!job.isEnabled()) {
-            return Ui.state(Ui.Tone.SKIP, "disabled");
+            // Neutral rather than skipped. A dash means "this was passed over" and belongs to a
+            // visit a run never reached; a disabled job is at rest, which is the open ring — the
+            // same shape "never run" gets, and the same shape the live spinner is drawn from.
+            return Ui.state(Ui.Tone.NEUTRAL, "disabled");
         }
         return lastRun.<Node>map(run -> Ui.state(run.status()))
                 .orElseGet(() -> Ui.state(Ui.Tone.NEUTRAL, "never run"));
@@ -365,7 +385,7 @@ public final class DashboardView {
             return Ui.Tone.LIVE.className();
         }
         if (!job.isEnabled()) {
-            return Ui.Tone.SKIP.className();
+            return Ui.Tone.NEUTRAL.className();
         }
         return lastRun == null ? Ui.Tone.NEUTRAL.className() : Ui.toneOf(lastRun.status()).className();
     }

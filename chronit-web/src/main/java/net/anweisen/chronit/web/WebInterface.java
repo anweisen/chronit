@@ -314,8 +314,10 @@ public final class WebInterface {
      */
     private void serveEvents(HttpExchange exchange) throws IOException {
         Map<String, String> initial = new LinkedHashMap<>();
+        DashboardView.Model model = dashboardModel();
         initial.put("state", stateJson());
-        initial.put("overview", DashboardView.overviewFragment(dashboardModel()));
+        initial.put("overview", DashboardView.overviewFragment(model));
+        initial.put("attention", DashboardView.attentionFragment(model));
         initial.put("runs", RunsView.render(recentRuns()));
         String account = queryParam(exchange, "login");
         if (account != null) {
@@ -333,8 +335,12 @@ public final class WebInterface {
                 lastPublishedState = state;
                 live.publish("state", state);
                 // The summary at the top is prose about the whole daemon, so it is rendered here
-                // rather than reassembled in the browser from the snapshot above.
-                live.publish("overview", DashboardView.overviewFragment(dashboardModel()));
+                // rather than reassembled in the browser from the snapshot above. The notice under
+                // it goes out as its own event: it changes a few times a year, the summary carries
+                // a clock, and a shared fragment made the notice redraw on every phase change.
+                DashboardView.Model model = dashboardModel();
+                live.publish("overview", DashboardView.overviewFragment(model));
+                live.publish("attention", DashboardView.attentionFragment(model));
             }
             long runsVersion = runsVersion();
             if (runsVersion != lastPublishedRunsVersion) {

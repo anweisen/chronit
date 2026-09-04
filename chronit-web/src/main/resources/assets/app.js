@@ -225,7 +225,11 @@
     });
 
     source.addEventListener('overview', (event) => {
-      swap('[data-overview]', event.data);
+      swap('[data-overview]', event.data, false);
+    });
+
+    source.addEventListener('attention', (event) => {
+      swap('[data-attention]', event.data);
     });
 
     source.addEventListener('runs', (event) => {
@@ -274,14 +278,45 @@
     }, delay);
   }
 
-  /** Replaces a server-rendered region, keeping the disclosures the reader had open. */
-  function swap(selector, html) {
+  /**
+   * Writes server-rendered markup into an element, but only when the server actually sent
+   * something different.
+   *
+   * The comparison is against the last markup *received*, kept on the element, rather than
+   * against its current `innerHTML`. Reading innerHTML back does not return what was written:
+   * the browser re-serialises on parse — the single quotes in the inline SVGs come back as double
+   * — and `tickTimes` rewrites every relative label a moment later, so "3 Sep, 19:06" is already
+   * "2 hours ago" by the time anything could be compared. Every one of those differences read as
+   * a change, which is why an update carrying identical data still animated.
+   *
+   * Kept in a WeakMap rather than a data attribute: the run history is twenty kilobytes of
+   * markup, and parking a copy of it in the DOM to compare against would be worse than the
+   * problem.
+   *
+   * @return true when the element was actually rewritten
+   */
+  const rendered = new WeakMap();
+
+  function applyHtml(element, html) {
+    if (rendered.get(element) === html) return false;
+    rendered.set(element, html);
+    element.innerHTML = html;
+    return true;
+  }
+
+  /**
+   * Replaces a server-rendered region, keeping the disclosures the reader had open.
+   *
+   * @param animate false for a region that ticks rather than appears. The summary at the top holds
+   *                a clock, and a number that fades every time it changes is a number nobody can
+   *                read; things that arrive get the entrance, things that count do not.
+   */
+  function swap(selector, html, animate = true) {
     const host = document.querySelector(selector);
-    if (!host || host.innerHTML === html) return;
-    host.innerHTML = html;
+    if (!host || !applyHtml(host, html)) return;
     restoreDisclosures(host);
     tickTimes(host);
-    enter(host);
+    if (animate) enter(host);
   }
 
   /**
@@ -314,8 +349,7 @@
     if (rail && job.railClass) rail.className = 'row__rail rail ' + job.railClass;
 
     const status = card.querySelector('[data-job-status]');
-    if (status && job.statusHtml && status.innerHTML !== job.statusHtml) {
-      status.innerHTML = job.statusHtml;
+    if (status && job.statusHtml && applyHtml(status, job.statusHtml)) {
       enter(status);
     }
 
@@ -390,8 +424,7 @@
     if (rail && account.railClass) rail.className = 'row__rail rail ' + account.railClass;
 
     const status = card.querySelector('[data-account-status]');
-    if (status && account.statusHtml && status.innerHTML !== account.statusHtml) {
-      status.innerHTML = account.statusHtml;
+    if (status && account.statusHtml && applyHtml(status, account.statusHtml)) {
       enter(status);
     }
     const detail = card.querySelector('[data-account-detail]');
