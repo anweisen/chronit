@@ -93,7 +93,22 @@ public final class TokenRefresher implements AutoCloseable {
 
         // Fixed delay rather than fixed rate: a sweep that runs long because Microsoft is slow
         // should push the next one out, not have it start the moment this one finishes.
-        ticker.scheduleWithFixedDelay(this::sweep, initialDelay, interval.toSeconds(), TimeUnit.SECONDS);
+        ticker.scheduleWithFixedDelay(this::sweepQuietly, initialDelay, interval.toSeconds(), TimeUnit.SECONDS);
+    }
+
+    /**
+     * The scheduled entry point.
+     *
+     * <p>A scheduled task that throws is cancelled and never runs again, so anything the per-account
+     * guard does not cover has to be caught here. {@link #sweep()} stays unguarded: a caller that
+     * ran one on purpose wants to be told it failed.
+     */
+    private void sweepQuietly() {
+        try {
+            sweep();
+        } catch (RuntimeException e) {
+            log.error("Token refresh sweep failed: {}", e.toString(), e);
+        }
     }
 
     /**

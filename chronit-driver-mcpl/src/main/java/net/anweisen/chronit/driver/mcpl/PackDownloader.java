@@ -103,37 +103,50 @@ final class PackDownloader {
             }
 
             Path temp = Files.createTempFile(ensureCacheDir(), "pack-", ".tmp");
-            long written;
-            String actualHash;
-            try (InputStream in = response.body()) {
-                MessageDigest digest = MessageDigest.getInstance("SHA-1");
-                try (OutputStream fileOut = Files.newOutputStream(temp);
-                     DigestOutputStream out = new DigestOutputStream(fileOut, digest)) {
-                    written = copyBounded(in, out);
+            // Deleted on every path out, not just the two that used to remember to. A pack host
+            // that drops the connection halfway through throws an ordinary IOException, and each
+            // failed download was leaving its partial file in the cache directory for good.
+            try {
+                long written;
+                String actualHash;
+                try (InputStream in = response.body()) {
+                    MessageDigest digest = MessageDigest.getInstance("SHA-1");
+                    try (OutputStream fileOut = Files.newOutputStream(temp);
+                         DigestOutputStream out = new DigestOutputStream(fileOut, digest)) {
+                        written = copyBounded(in, out);
+                    }
+                    actualHash = HexFormat.of().formatHex(digest.digest());
+                } catch (NoSuchAlgorithmException e) {
+                    throw new IllegalStateException("SHA-1 is required by the platform", e);
+                } catch (SizeLimitExceededException e) {
+                    return Result.failed("pack exceeded the configured size limit");
                 }
-                actualHash = HexFormat.of().formatHex(digest.digest());
-            } catch (NoSuchAlgorithmException e) {
-                throw new IllegalStateException("SHA-1 is required by the platform", e);
-            } catch (SizeLimitExceededException e) {
-                Files.deleteIfExists(temp);
-                return Result.failed("pack exceeded the configured size limit");
-            }
 
-            boolean matched = expectedHash == null || expectedHash.isBlank()
-                    || expectedHash.equalsIgnoreCase(actualHash);
+                boolean matched = expectedHash == null || expectedHash.isBlank()
+                        || expectedHash.equalsIgnoreCase(actualHash);
 
-            Path destination = cachePath(matched ? expectedHash : actualHash);
-            if (destination != null) {
-                Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING);
-            } else {
-                Files.deleteIfExists(temp);
+                Path destination = cachePath(matched ? expectedHash : actualHash);
+                if (destination != null) {
+                    Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING);
+                }
+                return new Result(true, written, actualHash, matched, null);
+            } finally {
+                deleteQuietly(temp);
             }
-            return new Result(true, written, actualHash, matched, null);
         } catch (IOException e) {
             return Result.failed(e.getClass().getSimpleName() + ": " + e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Result.failed("interrupted");
+        }
+    }
+
+    /** Cleanup must never be what turns a finished download into a reported failure. */
+    private static void deleteQuietly(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            log.debug("Could not remove the temporary pack file {}: {}", file, e.toString());
         }
     }
 

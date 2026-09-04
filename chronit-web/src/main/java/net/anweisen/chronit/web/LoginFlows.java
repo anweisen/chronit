@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * Tracks in-progress device code logins started from the browser.
@@ -26,9 +27,9 @@ final class LoginFlows {
     private final AccountManager accounts;
     private final Map<String, Flow> active = new ConcurrentHashMap<>();
     /** Told on every transition, so the sign-in page is pushed to rather than polling. */
-    private final java.util.function.Consumer<String> onChange;
+    private final Consumer<String> onChange;
 
-    LoginFlows(AccountManager accounts, java.util.function.Consumer<String> onChange) {
+    LoginFlows(AccountManager accounts, Consumer<String> onChange) {
         this.accounts = accounts;
         this.onChange = onChange;
     }
@@ -42,13 +43,27 @@ final class LoginFlows {
         return Optional.ofNullable(active.get(accountId));
     }
 
-    /** Starts a login unless one is already running for this account. */
+    /**
+     * Starts a login unless one is already running for this account.
+     *
+     * <p>Claimed in one step. Two clicks on the sign-in button arrive as two requests on two server
+     * threads, and looking before registering let both through: the page would show one device code
+     * while a second flow polled Microsoft with another, and whichever finished last would overwrite
+     * the session the other had just stored.
+     */
     void start(AccountConfig account) {
-        Flow existing = active.get(account.id());
-        if (existing != null && (existing.state() == State.STARTING || existing.state() == State.WAITING)) {
+        Flow starting = new Flow(State.STARTING, null, "Requesting a code...", Instant.now());
+        Flow claimed = active.compute(account.id(), (id, existing) ->
+                existing != null && (existing.state() == State.STARTING || existing.state() == State.WAITING)
+                        ? existing
+                        : starting);
+        // Identity, not equality: only the caller whose own object went into the map starts a
+        // thread. Two callers arriving together both see STARTING, and comparing by value cannot
+        // tell which of them put it there.
+        if (claimed != starting) {
             return;
         }
-        set(account.id(), new Flow(State.STARTING, null, "Requesting a code...", Instant.now()));
+        announce(account.id());
 
         Thread worker = new Thread(() -> {
             try {
@@ -70,6 +85,10 @@ final class LoginFlows {
 
     private void set(String accountId, Flow flow) {
         active.put(accountId, flow);
+        announce(accountId);
+    }
+
+    private void announce(String accountId) {
         if (onChange != null) {
             onChange.accept(accountId);
         }
