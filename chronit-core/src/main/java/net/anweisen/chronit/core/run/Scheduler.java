@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -162,15 +163,10 @@ public final class Scheduler implements AutoCloseable {
                 schedule.next().orElse(null),
                 schedule.timeUntilNext().map(Durations::format).orElse("never"),
                 orchestrator.isRunning(id))));
-        result.sort((a, b) -> {
-            if (a.nextRun() == null) {
-                return 1;
-            }
-            if (b.nextRun() == null) {
-                return -1;
-            }
-            return a.nextRun().compareTo(b.nextRun());
-        });
+        // Two jobs that will never fire again compare equal. Returning "after" for both, as this
+        // did, is not a valid ordering, and TimSort rejects one outright past 32 elements.
+        result.sort(Comparator.comparing(Upcoming::nextRun,
+                Comparator.nullsLast(Comparator.naturalOrder())));
         return result;
     }
 

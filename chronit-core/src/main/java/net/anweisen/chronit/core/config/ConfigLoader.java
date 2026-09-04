@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -120,7 +121,7 @@ public final class ConfigLoader {
                         missingSecrets.stream()
                                 .distinct()
                                 .map(name -> "{{secrets." + name + "}} — add it to the secrets file, "
-                                        + "or set " + SECRET_ENV_PREFIX + name.toUpperCase(java.util.Locale.ROOT))
+                                        + "or set " + SECRET_ENV_PREFIX + name.toUpperCase(Locale.ROOT))
                                 .toList());
             }
             secrets.values().forEach(Redactor::register);
@@ -172,7 +173,7 @@ public final class ConfigLoader {
         // Environment wins, so a compose file or orchestrator secret can override the file.
         environment.forEach((key, value) -> {
             if (key.startsWith(SECRET_ENV_PREFIX)) {
-                secrets.put(key.substring(SECRET_ENV_PREFIX.length()).toLowerCase(java.util.Locale.ROOT), value);
+                secrets.put(key.substring(SECRET_ENV_PREFIX.length()).toLowerCase(Locale.ROOT), value);
             }
         });
         return secrets;

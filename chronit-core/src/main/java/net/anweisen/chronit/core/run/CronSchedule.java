@@ -1,5 +1,6 @@
 package net.anweisen.chronit.core.run;
 
+import com.cronutils.descriptor.CronDescriptor;
 import com.cronutils.model.Cron;
 import com.cronutils.model.CronType;
 import com.cronutils.model.definition.CronDefinitionBuilder;
@@ -10,6 +11,7 @@ import net.anweisen.chronit.core.config.ConfigException;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.Locale;
 import java.util.Optional;
 
 /**
@@ -42,7 +44,7 @@ public final class CronSchedule {
      */
     public String description() {
         try {
-            return com.cronutils.descriptor.CronDescriptor.instance(java.util.Locale.ENGLISH)
+            return CronDescriptor.instance(Locale.ENGLISH)
                     .describe(cron);
         } catch (RuntimeException e) {
             // Describing is decoration; a library that cannot phrase an otherwise valid expression

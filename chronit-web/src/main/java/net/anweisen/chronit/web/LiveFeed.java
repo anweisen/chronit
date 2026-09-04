@@ -81,9 +81,16 @@ final class LiveFeed implements AutoCloseable {
      * given an expanding pool rather than a fixed one.
      */
     void serve(HttpExchange exchange, Map<String, String> initial) throws IOException {
-        if (closed.get() || subscribers.size() >= MAX_SUBSCRIBERS) {
-            exchange.sendResponseHeaders(503, -1);
-            return;
+        Subscriber subscriber = new Subscriber();
+        // Admission and registration have to be one step. Checking the size and adding afterwards
+        // let concurrent requests past the cap together, and let one register into a feed that
+        // close() had already emptied — a stream nothing would ever stop.
+        synchronized (subscribers) {
+            if (closed.get() || subscribers.size() >= MAX_SUBSCRIBERS) {
+                exchange.sendResponseHeaders(503, -1);
+                return;
+            }
+            subscribers.add(subscriber);
         }
 
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
@@ -97,8 +104,6 @@ final class LiveFeed implements AutoCloseable {
         // Zero means chunked, which is what lets the body stay open.
         exchange.sendResponseHeaders(200, 0);
 
-        Subscriber subscriber = new Subscriber();
-        subscribers.add(subscriber);
         try (OutputStream out = exchange.getResponseBody()) {
             // Tells the browser how long to wait before reconnecting after a drop. The default is
             // three seconds; two is a better fit for something being watched during a run.
@@ -118,16 +123,20 @@ final class LiveFeed implements AutoCloseable {
     @Override
     public void close() {
         closed.set(true);
-        subscribers.forEach(Subscriber::stop);
-        subscribers.clear();
+        synchronized (subscribers) {
+            subscribers.forEach(Subscriber::stop);
+            subscribers.clear();
+        }
     }
 
     private static void writeEvent(OutputStream out, String event, String data) throws IOException {
         StringBuilder frame = new StringBuilder(data.length() + 32);
         frame.append("event: ").append(event).append('\n');
         // The wire format is line-oriented, so a payload containing a newline has to be sent as
-        // several data lines; the browser rejoins them.
-        for (String line : data.split("\n", -1)) {
+        // several data lines; the browser rejoins them. A carriage return ends a line for the
+        // parser too, so splitting on newlines alone would leave one sitting inside a data line
+        // and cut the frame short.
+        for (String line : data.split("\r\n|\r|\n", -1)) {
             frame.append("data: ").append(line).append('\n');
         }
         frame.append('\n');

@@ -25,6 +25,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Runs jobs: a sequence of server visits, in order, with gaps in between.
@@ -43,8 +44,11 @@ public final class Orchestrator {
     private final AccountLocks locks = new AccountLocks();
     private final RunHistory history;
 
-    /** Jobs currently executing — for the overlap policy, and so they can be stopped. */
+    /** Jobs currently executing, so they can be shown and stopped. */
     private final Map<String, JobExecution> running = new ConcurrentHashMap<>();
+
+    /** One per job, held for the length of a run: the overlap policy in one place. */
+    private final Map<String, ReentrantLock> jobLocks = new ConcurrentHashMap<>();
 
     /**
      * Told whenever anything observable about a run changes.
@@ -130,18 +134,37 @@ public final class Orchestrator {
     }
 
     /**
-     * Runs a job to completion.
+     * Runs a job to completion, one run of a given job at a time.
+     *
+     * <p>The overlap policy is enforced by holding the job's lock for the whole run rather than by
+     * looking at {@link #running}: the scheduler, the command line and the web interface can all
+     * start the same job, and a check followed by a registration lets two of them through the gap
+     * between the two. That mattered for more than the policy — the second run would replace the
+     * first in {@link #running}, so the first to finish removed the other's entry and left a job
+     * that could no longer be found or stopped.
      *
      * @param trigger how the run was started, recorded in the history ("schedule", "cli", "web")
      * @return the record, or empty if the overlap policy dropped this run
      */
     public Optional<RunRecord> runJob(JobConfig job, String trigger) throws InterruptedException {
-        if (job.overlapOrDefault() == JobConfig.Overlap.SKIP && running.containsKey(job.id())) {
-            log.warn("Job '{}' is still running since {}; skipping this run (overlap: skip)",
-                    job.id(), running.get(job.id()).startedAt());
-            return Optional.empty();
+        ReentrantLock slot = jobLocks.computeIfAbsent(job.id(), ignored -> new ReentrantLock(true));
+        if (!slot.tryLock()) {
+            if (job.overlapOrDefault() == JobConfig.Overlap.SKIP) {
+                log.warn("Job '{}' is still running; skipping this run (overlap: skip)", job.id());
+                return Optional.empty();
+            }
+            log.info("Job '{}' is still running; queueing this run behind it (overlap: queue)", job.id());
+            slot.lockInterruptibly();
         }
+        try {
+            return Optional.of(runClaimed(job, trigger));
+        } finally {
+            slot.unlock();
+        }
+    }
 
+    /** The body of a run, with this job's slot already held. */
+    private RunRecord runClaimed(JobConfig job, String trigger) throws InterruptedException {
         List<VisitConfig> plan = job.visits() == null ? List.of() : job.visits();
         JobExecution execution = new JobExecution(
                 job.id(), trigger, Thread.currentThread(), plan.size(), this::announce);
@@ -203,7 +226,7 @@ public final class Orchestrator {
                 abandonedBecause = "The job was stopped before this visit";
             }
         } finally {
-            running.remove(job.id());
+            running.remove(job.id(), execution);
             // Cancelling interrupts this thread. The scheduler's pool reuses it, so the flag has
             // to be cleared or the next job would abort the moment it slept.
             Thread.interrupted();
@@ -226,7 +249,7 @@ public final class Orchestrator {
                 job.id(), record.status().name().toLowerCase(Locale.ENGLISH),
                 Durations.format(record.duration()), record.successCount(), record.attemptedCount(),
                 record.skippedCount());
-        return Optional.of(record);
+        return record;
     }
 
     /**
@@ -264,6 +287,7 @@ public final class Orchestrator {
         RunRecord record = new RunRecord(runId, "(ad-hoc)", trigger, startedAt, Instant.now(), List.of(result));
         history.append(record);
         lastRun.set(record);
+        announce();
         return record;
     }
 }

@@ -13,6 +13,7 @@ import net.anweisen.chronit.core.driver.ReadyInfo;
 import net.anweisen.chronit.core.driver.ServerTarget;
 import net.anweisen.chronit.core.driver.SessionSettings;
 import net.anweisen.chronit.core.driver.SlotClick;
+import net.anweisen.chronit.core.util.Durations;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import org.geysermc.mcprotocollib.network.Session;
@@ -83,8 +84,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
@@ -162,8 +165,8 @@ final class McplSession implements ClientHandle {
      * The container the server has opened, or null. Replaced wholesale rather than mutated so a
      * reader always sees a consistent snapshot.
      */
-    private final java.util.concurrent.atomic.AtomicReference<OpenContainer> container =
-            new java.util.concurrent.atomic.AtomicReference<>();
+    private final AtomicReference<OpenContainer> container =
+            new AtomicReference<>();
 
     private volatile long batchStartedAtNanos;
     private volatile ScheduledFuture<?> tickTask;
@@ -398,7 +401,7 @@ final class McplSession implements ClientHandle {
         }
         if (open != null && !open.contentsReceived()) {
             log.warn("Menu {} has not sent its contents after {}; clicking anyway",
-                    open.containerId(), net.anweisen.chronit.core.util.Durations.format(CONTENTS_GRACE));
+                    open.containerId(), Durations.format(CONTENTS_GRACE));
         }
         return open;
     }
@@ -632,7 +635,7 @@ final class McplSession implements ClientHandle {
 
         log.info("In the world at {} after {} ({} chunks)",
                 request.target().address(),
-                net.anweisen.chronit.core.util.Durations.format(info.timeToReady()),
+                Durations.format(info.timeToReady()),
                 info.chunksReceived());
 
         ready.complete(info);
@@ -649,9 +652,9 @@ final class McplSession implements ClientHandle {
                 return;
             }
             String message = "Did not reach the world within "
-                    + net.anweisen.chronit.core.util.Durations.format(timeout) + " (stopped at " + phase + ")";
+                    + Durations.format(timeout) + " (stopped at " + phase + ")";
             log.warn("{} — giving up on {}", message, request.target().address());
-            ready.completeExceptionally(new java.util.concurrent.TimeoutException(message));
+            ready.completeExceptionally(new TimeoutException(message));
             closeReason = message;
             closing.set(true);
             session.disconnect(Component.text("Timed out joining"));

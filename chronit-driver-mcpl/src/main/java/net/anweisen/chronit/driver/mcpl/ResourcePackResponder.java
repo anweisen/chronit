@@ -3,6 +3,7 @@ package net.anweisen.chronit.driver.mcpl;
 import net.anweisen.chronit.core.config.ResourcePackConfig;
 import net.anweisen.chronit.core.driver.ClientEvents;
 import net.anweisen.chronit.core.driver.ResourcePackEvent;
+import net.anweisen.chronit.core.util.Durations;
 import net.anweisen.chronit.core.util.Jitter;
 import org.geysermc.mcprotocollib.network.Session;
 import org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus;
@@ -160,7 +161,7 @@ final class ResourcePackResponder {
 
         log.info("Resource pack {} downloaded, {} bytes in {}",
                 shortId(pack.id()), result.sizeBytes(),
-                net.anweisen.chronit.core.util.Durations.format(Duration.between(pack.pushedAt(), Instant.now())));
+                Durations.format(Duration.between(pack.pushedAt(), Instant.now())));
 
         report(pack, ResourcePackStatus.DOWNLOADED, result.sizeBytes());
         scheduleLoaded(pack, result.sizeBytes());

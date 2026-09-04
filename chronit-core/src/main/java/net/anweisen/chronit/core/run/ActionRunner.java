@@ -2,6 +2,7 @@ package net.anweisen.chronit.core.run;
 
 import net.anweisen.chronit.core.config.ActionConfig;
 import net.anweisen.chronit.core.config.WaitForConfig;
+import net.anweisen.chronit.core.driver.ChatLine;
 import net.anweisen.chronit.core.driver.ClientHandle;
 import net.anweisen.chronit.core.driver.ContainerInfo;
 import net.anweisen.chronit.core.util.Durations;
@@ -170,7 +171,7 @@ public final class ActionRunner {
         if (matched instanceof ContainerInfo container) {
             return container.describe();
         }
-        if (matched instanceof net.anweisen.chronit.core.driver.ChatLine line) {
+        if (matched instanceof ChatLine line) {
             return Redactor.redact(line.plainText());
         }
         return String.valueOf(matched);

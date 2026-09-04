@@ -12,7 +12,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -61,13 +63,15 @@ public final class RunHistory {
 
     /** Most recent first. */
     public synchronized List<RunRecord> recent(int limit) {
-        return recent.stream()
-                .collect(java.util.stream.Collectors.collectingAndThen(
-                        java.util.stream.Collectors.toList(),
-                        list -> {
-                            java.util.Collections.reverse(list);
-                            return list.stream().limit(limit).toList();
-                        }));
+        if (limit <= 0) {
+            return List.of();
+        }
+        List<RunRecord> newestFirst = new ArrayList<>(Math.min(limit, recent.size()));
+        Iterator<RunRecord> backwards = recent.descendingIterator();
+        while (backwards.hasNext() && newestFirst.size() < limit) {
+            newestFirst.add(backwards.next());
+        }
+        return List.copyOf(newestFirst);
     }
 
     public Path file() {

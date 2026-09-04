@@ -9,6 +9,7 @@ import net.anweisen.chronit.core.driver.DriverException;
 import net.anweisen.chronit.core.driver.MinecraftClientDriver;
 import net.anweisen.chronit.core.driver.ServerStatus;
 import net.anweisen.chronit.core.driver.ServerTarget;
+import net.anweisen.chronit.core.util.Durations;
 import org.geysermc.mcprotocollib.auth.GameProfile;
 import org.geysermc.mcprotocollib.network.BuiltinFlags;
 import org.geysermc.mcprotocollib.network.ProxyInfo;
@@ -123,7 +124,7 @@ public final class McplDriver implements MinecraftClientDriver {
                     Duration.ofMillis(Math.max(0, latencyMillis.get())));
         } catch (TimeoutException e) {
             throw new DriverException("No status response from " + target.address()
-                    + " within " + net.anweisen.chronit.core.util.Durations.format(timeout), e);
+                    + " within " + Durations.format(timeout), e);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             throw cause instanceof DriverException driverError

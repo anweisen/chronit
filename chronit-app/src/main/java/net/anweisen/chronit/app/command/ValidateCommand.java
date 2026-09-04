@@ -1,5 +1,6 @@
 package net.anweisen.chronit.app.command;
 
+import net.anweisen.chronit.core.config.AccountConfig;
 import net.anweisen.chronit.core.config.ChronitConfig;
 import net.anweisen.chronit.core.config.JobConfig;
 import net.anweisen.chronit.core.config.ProtocolSpec;
@@ -38,7 +39,7 @@ public final class ValidateCommand implements Callable<Integer> {
         config.accountsOrEmpty().forEach(account -> System.out.printf("  %-14s %s%s%n",
                 account.id(),
                 account.authOrDefault(),
-                account.authOrDefault() == net.anweisen.chronit.core.config.AccountConfig.AuthMode.OFFLINE
+                account.authOrDefault() == AccountConfig.AuthMode.OFFLINE
                         ? " as " + account.username() : ""));
 
         System.out.println();

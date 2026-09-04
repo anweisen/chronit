@@ -7,7 +7,11 @@ import net.anweisen.chronit.app.command.PingCommand;
 import net.anweisen.chronit.app.command.RunCommand;
 import net.anweisen.chronit.app.command.ValidateCommand;
 import net.anweisen.chronit.core.config.ConfigException;
+import net.anweisen.chronit.core.driver.TranslationProvider;
+import net.anweisen.chronit.driver.mcpl.McplDriver;
 import picocli.CommandLine;
+
+import java.util.List;
 
 /**
  * Command line entry point.
@@ -67,13 +71,14 @@ public final class Chronit {
         @Override
         public String[] getVersion() {
             String implementation = Chronit.class.getPackage().getImplementationVersion();
+            List<TranslationProvider> translation = TranslationProvider.discover();
             return new String[]{
                     "chronit " + (implementation != null ? implementation : "development build"),
-                    "Minecraft " + net.anweisen.chronit.driver.mcpl.McplDriver.NATIVE_VERSION
-                            + " (protocol " + net.anweisen.chronit.driver.mcpl.McplDriver.NATIVE_PROTOCOL + ")",
-                    "Protocol translation: " + (net.anweisen.chronit.core.driver.TranslationProvider.discover().isEmpty()
-                            ? "not installed" : net.anweisen.chronit.core.driver.TranslationProvider.discover()
-                            .stream().map(net.anweisen.chronit.core.driver.TranslationProvider::id).toList())
+                    "Minecraft " + McplDriver.NATIVE_VERSION
+                            + " (protocol " + McplDriver.NATIVE_PROTOCOL + ")",
+                    "Protocol translation: " + (translation.isEmpty()
+                            ? "not installed"
+                            : translation.stream().map(TranslationProvider::id).toList())
             };
         }
     }

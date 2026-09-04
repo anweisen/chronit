@@ -28,6 +28,7 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -213,17 +214,18 @@ public final class WebInterface {
                 json(exchange, 200, stateJson());
                 return;
             }
-            if (path.startsWith("/api/jobs/") && path.endsWith("/run") && method.equals("POST")) {
-                runJob(exchange, decode(path.substring("/api/jobs/".length(), path.length() - "/run".length())));
+            String jobId = segment(path, "/api/jobs/", "/run");
+            if (jobId != null && method.equals("POST")) {
+                runJob(exchange, jobId);
                 return;
             }
-            if (path.startsWith("/api/jobs/") && path.endsWith("/cancel") && method.equals("POST")) {
-                cancelJob(exchange,
-                        decode(path.substring("/api/jobs/".length(), path.length() - "/cancel".length())));
+            jobId = segment(path, "/api/jobs/", "/cancel");
+            if (jobId != null && method.equals("POST")) {
+                cancelJob(exchange, jobId);
                 return;
             }
-            if (path.startsWith("/accounts/") && path.endsWith("/login")) {
-                String accountId = decode(path.substring("/accounts/".length(), path.length() - "/login".length()));
+            String accountId = segment(path, "/accounts/", "/login");
+            if (accountId != null) {
                 if (method.equals("GET")) {
                     loginPage(exchange, accountId);
                 } else {
@@ -231,9 +233,8 @@ public final class WebInterface {
                 }
                 return;
             }
-            if (path.startsWith("/api/accounts/") && path.endsWith("/login")) {
-                String accountId = decode(
-                        path.substring("/api/accounts/".length(), path.length() - "/login".length()));
+            accountId = segment(path, "/api/accounts/", "/login");
+            if (accountId != null) {
                 loginApi(exchange, accountId, method);
                 return;
             }
@@ -272,10 +273,23 @@ public final class WebInterface {
         return cookie(exchange, SESSION_COOKIE).filter(this::matchesToken).isPresent();
     }
 
+    /**
+     * Compared as digests rather than as the raw bytes.
+     *
+     * <p>{@link MessageDigest#isEqual} is constant time only across equal-length inputs; handed two
+     * different lengths it returns immediately, which tells a caller the length of the token it is
+     * guessing. Hashing first makes both sides 32 bytes whatever was presented.
+     */
     private boolean matchesToken(String presented) {
-        return MessageDigest.isEqual(
-                presented.getBytes(StandardCharsets.UTF_8),
-                webConfig.token().getBytes(StandardCharsets.UTF_8));
+        return MessageDigest.isEqual(sha256(presented), sha256(webConfig.token()));
+    }
+
+    private static byte[] sha256(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required of every JVM", e);
+        }
     }
 
     private void denyOrPrompt(HttpExchange exchange) throws IOException {
@@ -293,11 +307,19 @@ public final class WebInterface {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         String presented = formField(body, "token").orElse("");
 
-        if (!requiresToken() || matchesToken(presented)) {
+        if (!requiresToken()) {
+            // Nothing to remember, and nothing may be echoed back: whatever was posted is
+            // unvalidated input, and a carriage return in it would end the Set-Cookie line and let
+            // the caller write headers of its own.
+            redirect(exchange, "/");
+            return;
+        }
+        if (matchesToken(presented)) {
             // Strict same-site and HttpOnly: the dashboard has action endpoints, so the cookie must
             // not ride along with a cross-site request or be readable by script.
             exchange.getResponseHeaders().add("Set-Cookie",
-                    SESSION_COOKIE + "=" + presented + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800");
+                    SESSION_COOKIE + "=" + webConfig.token()
+                            + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800");
             redirect(exchange, "/");
             return;
         }
@@ -708,6 +730,24 @@ public final class WebInterface {
 
     private static String decode(String value) {
         return URLDecoder.decode(value, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * The decoded id a path carries between a fixed prefix and suffix, or null when the path is
+     * not that shape.
+     *
+     * <p>Matching the two ends separately and slicing between them looks equivalent but is not:
+     * {@code /api/jobs/run} starts with {@code /api/jobs/} and ends with {@code /run} while having
+     * nothing in between, and the slice then ran backwards and threw. A crafted path answering 500
+     * rather than 404 is a needless way to look broken.
+     */
+    private static String segment(String path, String prefix, String suffix) {
+        if (!path.startsWith(prefix) || !path.endsWith(suffix)) {
+            return null;
+        }
+        int start = prefix.length();
+        int end = path.length() - suffix.length();
+        return start < end ? decode(path.substring(start, end)) : null;
     }
 
     /** Static files read once from the jar, with a content hash for cache busting. */

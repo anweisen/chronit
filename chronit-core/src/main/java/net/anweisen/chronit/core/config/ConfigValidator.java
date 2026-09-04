@@ -3,6 +3,8 @@ package net.anweisen.chronit.core.config;
 import com.cronutils.model.CronType;
 import com.cronutils.model.definition.CronDefinitionBuilder;
 import com.cronutils.parser.CronParser;
+import net.anweisen.chronit.core.driver.ContainerInfo;
+import net.anweisen.chronit.core.driver.SlotClick;
 import net.anweisen.chronit.core.util.Durations;
 
 import java.time.Duration;
@@ -238,8 +240,8 @@ public final class ConfigValidator {
             problems.add(path + ".slot: required");
         } else if (click.slot() < 0) {
             problems.add(path + ".slot: must not be negative");
-        } else if (click.inventory() == net.anweisen.chronit.core.driver.SlotClick.InventoryPart.PLAYER
-                && click.slot() >= net.anweisen.chronit.core.driver.ContainerInfo.PLAYER_INVENTORY_SLOTS) {
+        } else if (click.inventory() == SlotClick.InventoryPart.PLAYER
+                && click.slot() >= ContainerInfo.PLAYER_INVENTORY_SLOTS) {
             problems.add(path + ".slot: " + click.slot() + " is outside the player inventory "
                     + "(0-26 are the main rows, 27-35 the hotbar)");
         }
@@ -329,6 +331,13 @@ public final class ConfigValidator {
         if (!web.isLoopbackOnly() && isBlank(web.token())) {
             problems.add("web.token: required when web.bind is not loopback — the interface can start "
                     + "a login flow and show run history, so it must not be exposed unauthenticated");
+        }
+        // The token is handed back to the browser as a cookie value, so it has to survive being
+        // written into a header. A separator ends the value early; a control character ends the
+        // header line itself.
+        if (!isBlank(web.token()) && !web.token().matches("[\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]+")) {
+            problems.add("web.token: use only printable ASCII without spaces, commas, semicolons, "
+                    + "quotes or backslashes");
         }
     }
 

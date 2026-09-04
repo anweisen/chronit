@@ -16,6 +16,7 @@ import net.anweisen.chronit.core.driver.ContainerInfo;
 import net.anweisen.chronit.core.driver.DisconnectInfo;
 import net.anweisen.chronit.core.driver.DriverException;
 import net.anweisen.chronit.core.driver.MinecraftClientDriver;
+import net.anweisen.chronit.core.driver.Phase;
 import net.anweisen.chronit.core.driver.ReadyInfo;
 import net.anweisen.chronit.core.driver.ResourcePackEvent;
 import net.anweisen.chronit.core.driver.ServerTarget;
@@ -353,7 +354,7 @@ public final class VisitRunner {
          * that has stopped updating.
          */
         @Override
-        public void onPhase(net.anweisen.chronit.core.driver.Phase phase) {
+        public void onPhase(Phase phase) {
             if (execution != null) {
                 execution.reportPhase(phase);
             }
