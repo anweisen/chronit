@@ -18,22 +18,22 @@ import java.util.ServiceLoader;
  */
 public interface PipelineCustomizer {
 
-    String id();
+  String id();
 
-    /** Whether a client speaking {@code nativeProtocol} can be translated to {@code targetProtocol}. */
-    boolean canTranslate(int nativeProtocol, int targetProtocol);
+  /** Whether a client speaking {@code nativeProtocol} can be translated to {@code targetProtocol}. */
+  boolean canTranslate(int nativeProtocol, int targetProtocol);
 
-    /**
-     * Called once per connection, after the standard Minecraft handlers are in the pipeline and
-     * before anything is written.
-     */
-    void customize(Channel channel, int nativeProtocol, int targetProtocol, ServerTarget target);
+  /**
+   * Called once per connection, after the standard Minecraft handlers are in the pipeline and
+   * before anything is written.
+   */
+  void customize(Channel channel, int nativeProtocol, int targetProtocol, ServerTarget target);
 
-    /** The first installed customizer that can reach {@code targetProtocol}. */
-    static Optional<PipelineCustomizer> forTarget(int nativeProtocol, int targetProtocol) {
-        return ServiceLoader.load(PipelineCustomizer.class).stream()
-                .map(ServiceLoader.Provider::get)
-                .filter(customizer -> customizer.canTranslate(nativeProtocol, targetProtocol))
-                .findFirst();
-    }
+  /** The first installed customizer that can reach {@code targetProtocol}. */
+  static Optional<PipelineCustomizer> forTarget(int nativeProtocol, int targetProtocol) {
+    return ServiceLoader.load(PipelineCustomizer.class).stream()
+        .map(ServiceLoader.Provider::get)
+        .filter(customizer -> customizer.canTranslate(nativeProtocol, targetProtocol))
+        .findFirst();
+  }
 }

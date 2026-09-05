@@ -20,41 +20,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ExampleConfigTest {
 
-    private static final Path EXAMPLE = Path.of("..", "config", "chronit.example.yml");
+  private static final Path EXAMPLE = Path.of("..", "config", "chronit.example.yml");
 
-    @Test
-    void theShippedExampleStillLoads() throws IOException {
-        ChronitConfig config = load();
+  @Test
+  void theShippedExampleStillLoads() throws IOException {
+    ChronitConfig config = load();
 
-        assertEquals(2, config.accountsOrEmpty().size());
-        assertTrue(config.server("survival").isPresent());
-        assertTrue(config.job("nightly").isPresent(), "jobs: " + config.jobsOrEmpty());
-    }
+    assertEquals(2, config.accountsOrEmpty().size());
+    assertTrue(config.server("survival").isPresent());
+    assertTrue(config.job("nightly").isPresent(), "jobs: " + config.jobsOrEmpty());
+  }
 
-    @Test
-    void theExampleDocumentsTheRealRefreshDefaults() throws IOException {
-        AuthConfig example = load().authOrDefaults();
+  @Test
+  void theExampleDocumentsTheRealRefreshDefaults() throws IOException {
+    AuthConfig example = load().authOrDefaults();
 
-        // The block is written out in full as documentation, so it has to agree with the code it
-        // claims to be showing.
-        assertEquals(AuthConfig.DEFAULTS.refreshOnStart(), example.refreshOnStart());
-        assertEquals(AuthConfig.DEFAULTS.refreshInterval(), example.refreshInterval());
-        assertEquals(AuthConfig.DEFAULTS.refreshMargin(), example.refreshMargin());
-        assertEquals(Duration.ofHours(6).plusMinutes(30), example.sweepHorizon());
-    }
+    // The block is written out in full as documentation, so it has to agree with the code it
+    // claims to be showing.
+    assertEquals(AuthConfig.DEFAULTS.refreshOnStart(), example.refreshOnStart());
+    assertEquals(AuthConfig.DEFAULTS.refreshInterval(), example.refreshInterval());
+    assertEquals(AuthConfig.DEFAULTS.refreshMargin(), example.refreshMargin());
+    assertEquals(Duration.ofHours(6).plusMinutes(30), example.sweepHorizon());
+  }
 
-    /**
-     * Loads it with the one line removed that points at a path only a deployment has, and the
-     * secret it references supplied from the environment instead.
-     */
-    private ChronitConfig load() throws IOException {
-        String yaml = Files.readString(EXAMPLE).lines()
-                .filter(line -> !line.startsWith("secretsFile:"))
-                .reduce(new StringBuilder(), (out, line) -> out.append(line).append('\n'),
-                        StringBuilder::append)
-                .toString();
+  /**
+   * Loads it with the one line removed that points at a path only a deployment has, and the
+   * secret it references supplied from the environment instead.
+   */
+  private ChronitConfig load() throws IOException {
+    String yaml = Files.readString(EXAMPLE).lines()
+        .filter(line -> !line.startsWith("secretsFile:"))
+        .reduce(new StringBuilder(), (out, line) -> out.append(line).append('\n'),
+            StringBuilder::append)
+        .toString();
 
-        return new ConfigLoader(Map.of("CHRONIT_SECRET_SURVIVAL_PASSWORD", "not-a-real-password"))
-                .loadString(yaml);
-    }
+    return new ConfigLoader(Map.of("CHRONIT_SECRET_SURVIVAL_PASSWORD", "not-a-real-password"))
+        .loadString(yaml);
+  }
 }

@@ -8,18 +8,18 @@ package net.anweisen.chronit.web.html;
  */
 public record Attr(String name, String value) implements Node {
 
-    /** A boolean attribute such as {@code disabled}, rendered without a value. */
-    public static Attr flag(String name) {
-        return new Attr(name, null);
-    }
+  /** A boolean attribute such as {@code disabled}, rendered without a value. */
+  public static Attr flag(String name) {
+    return new Attr(name, null);
+  }
 
-    @Override
-    public void render(StringBuilder out) {
-        out.append(' ').append(name);
-        if (value != null) {
-            out.append("=\"");
-            Node.escapeInto(out, value);
-            out.append('"');
-        }
+  @Override
+  public void render(StringBuilder out) {
+    out.append(' ').append(name);
+    if (value != null) {
+      out.append("=\"");
+      Node.escapeInto(out, value);
+      out.append('"');
     }
+  }
 }

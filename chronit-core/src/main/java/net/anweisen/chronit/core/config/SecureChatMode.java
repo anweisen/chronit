@@ -8,10 +8,10 @@ package net.anweisen.chronit.core.config;
  * that carries no signature — so this only matters for visits that send plain chat.
  */
 public enum SecureChatMode {
-    /** Establish a chat session when the account has usable certificates, otherwise carry on. */
-    AUTO,
-    /** Always establish a chat session; fail the visit if certificates are unavailable. */
-    ON,
-    /** Never establish a chat session. Plain chat will be rejected by enforcing servers. */
-    OFF
+  /** Establish a chat session when the account has usable certificates, otherwise carry on. */
+  AUTO,
+  /** Always establish a chat session; fail the visit if certificates are unavailable. */
+  ON,
+  /** Never establish a chat session. Plain chat will be rejected by enforcing servers. */
+  OFF
 }

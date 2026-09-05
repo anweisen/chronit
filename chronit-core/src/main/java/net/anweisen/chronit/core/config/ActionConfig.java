@@ -19,40 +19,40 @@ import java.time.Duration;
  * @param delayAfter  pause after this step, before the next one
  */
 public record ActionConfig(
-        String command,
-        String chat,
-        @JsonProperty("wait") Duration pause,
-        ClickConfig click,
-        Boolean closeScreen,
-        WaitForConfig waitFor,
-        Duration delayAfter) {
+    String command,
+    String chat,
+    @JsonProperty("wait") Duration pause,
+    ClickConfig click,
+    Boolean closeScreen,
+    WaitForConfig waitFor,
+    Duration delayAfter) {
 
-    public Kind kind() {
-        if (command != null) {
-            return Kind.COMMAND;
-        }
-        if (chat != null) {
-            return Kind.CHAT;
-        }
-        if (click != null) {
-            return Kind.CLICK;
-        }
-        if (closeScreen != null) {
-            return Kind.CLOSE_SCREEN;
-        }
-        return Kind.WAIT;
+  public Kind kind() {
+    if (command != null) {
+      return Kind.COMMAND;
     }
-
-    public enum Kind { COMMAND, CHAT, WAIT, CLICK, CLOSE_SCREEN }
-
-    /** Short description for logs, with the payload omitted so passwords are not echoed. */
-    public String describe() {
-        return switch (kind()) {
-            case COMMAND -> "command /" + command;
-            case CHAT -> "chat message";
-            case WAIT -> "wait";
-            case CLICK -> "click " + click.toSlotClick().describe();
-            case CLOSE_SCREEN -> "close screen";
-        };
+    if (chat != null) {
+      return Kind.CHAT;
     }
+    if (click != null) {
+      return Kind.CLICK;
+    }
+    if (closeScreen != null) {
+      return Kind.CLOSE_SCREEN;
+    }
+    return Kind.WAIT;
+  }
+
+  public enum Kind { COMMAND, CHAT, WAIT, CLICK, CLOSE_SCREEN }
+
+  /** Short description for logs, with the payload omitted so passwords are not echoed. */
+  public String describe() {
+    return switch (kind()) {
+      case COMMAND -> "command /" + command;
+      case CHAT -> "chat message";
+      case WAIT -> "wait";
+      case CLICK -> "click " + click.toSlotClick().describe();
+      case CLOSE_SCREEN -> "close screen";
+    };
+  }
 }

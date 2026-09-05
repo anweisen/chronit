@@ -14,29 +14,29 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
  */
 final class Components {
 
-    private Components() {
-    }
+  private Components() {
+  }
 
-    static String plain(Component component) {
-        if (component == null) {
-            return "";
-        }
-        try {
-            return PlainTextComponentSerializer.plainText().serialize(component);
-        } catch (RuntimeException e) {
-            // A malformed component from a server must never take a session down.
-            return component.toString();
-        }
+  static String plain(Component component) {
+    if (component == null) {
+      return "";
     }
+    try {
+      return PlainTextComponentSerializer.plainText().serialize(component);
+    } catch (RuntimeException e) {
+      // A malformed component from a server must never take a session down.
+      return component.toString();
+    }
+  }
 
-    static String json(Component component) {
-        if (component == null) {
-            return null;
-        }
-        try {
-            return GsonComponentSerializer.gson().serialize(component);
-        } catch (RuntimeException e) {
-            return null;
-        }
+  static String json(Component component) {
+    if (component == null) {
+      return null;
     }
+    try {
+      return GsonComponentSerializer.gson().serialize(component);
+    } catch (RuntimeException e) {
+      return null;
+    }
+  }
 }

@@ -11,10 +11,10 @@ import java.time.Duration;
  * attempts a native connection first and only consults this on rejection.
  */
 public record ServerStatus(
-        String versionName,
-        int protocolVersion,
-        int onlinePlayers,
-        int maxPlayers,
-        String description,
-        Duration latency) {
+    String versionName,
+    int protocolVersion,
+    int onlinePlayers,
+    int maxPlayers,
+    String description,
+    Duration latency) {
 }

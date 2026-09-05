@@ -15,22 +15,22 @@ import org.geysermc.mcprotocollib.network.NetworkConstants;
  */
 final class ChronitVLPipeline extends VLPipeline {
 
-    ChronitVLPipeline(UserConnection user, ProtocolVersion version) {
-        super(user, version);
-    }
+  ChronitVLPipeline(UserConnection user, ProtocolVersion version) {
+    super(user, version);
+  }
 
-    @Override
-    protected String packetCodecName() {
-        return NetworkConstants.CODEC_NAME;
-    }
+  @Override
+  protected String packetCodecName() {
+    return NetworkConstants.CODEC_NAME;
+  }
 
-    @Override
-    protected String lengthCodecName() {
-        return NetworkConstants.SIZER_NAME;
-    }
+  @Override
+  protected String lengthCodecName() {
+    return NetworkConstants.SIZER_NAME;
+  }
 
-    @Override
-    protected String compressionCodecName() {
-        return NetworkConstants.COMPRESSION_NAME;
-    }
+  @Override
+  protected String compressionCodecName() {
+    return NetworkConstants.COMPRESSION_NAME;
+  }
 }

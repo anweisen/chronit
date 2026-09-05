@@ -11,49 +11,49 @@
  */
 
 plugins {
-    // java-library rather than java, so modules can distinguish `api` from `implementation` and
-    // a consumer's compile classpath only carries what it is actually meant to use.
-    `java-library`
+  // java-library rather than java, so modules can distinguish `api` from `implementation` and
+  // a consumer's compile classpath only carries what it is actually meant to use.
+  `java-library`
 }
 
 group = "net.anweisen.chronit"
 version = "1.0.0-SNAPSHOT"
 
 tasks.withType<JavaCompile>().configureEach {
-    // `--release` rather than a Java toolchain: it pins the API level to 21 while compiling with
-    // whatever JDK is running Gradle. A toolchain would additionally pin the compiler JDK, which
-    // sounds stricter but means the build cannot run at all on a machine without exactly that JDK
-    // installed. The container build fixes the JDK anyway.
-    options.release = 21
-    options.encoding = "UTF-8"
-    options.compilerArgs.addAll(
-        listOf(
-            // -try is off because holding a lock through a try-with-resources lease, without
-            // referencing the resource in the body, is deliberate and correct here.
-            "-Xlint:all,-serial,-processing,-try",
-            // Records need parameter names retained for Jackson to bind YAML without every
-            // component carrying a @JsonProperty.
-            "-parameters",
-        )
+  // `--release` rather than a Java toolchain: it pins the API level to 21 while compiling with
+  // whatever JDK is running Gradle. A toolchain would additionally pin the compiler JDK, which
+  // sounds stricter but means the build cannot run at all on a machine without exactly that JDK
+  // installed. The container build fixes the JDK anyway.
+  options.release = 21
+  options.encoding = "UTF-8"
+  options.compilerArgs.addAll(
+    listOf(
+      // -try is off because holding a lock through a try-with-resources lease, without
+      // referencing the resource in the body, is deliberate and correct here.
+      "-Xlint:all,-serial,-processing,-try",
+      // Records need parameter names retained for Jackson to bind YAML without every
+      // component carrying a @JsonProperty.
+      "-parameters",
     )
+  )
 }
 
 tasks.withType<Test>().configureEach {
-    useJUnitPlatform()
+  useJUnitPlatform()
 
-    testLogging {
-        events("failed")
-        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
-        showStackTraces = true
-    }
+  testLogging {
+    events("failed")
+    exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    showStackTraces = true
+  }
 
-    // The protocol tests open real sockets to an in-process server. Running test classes in
-    // parallel would have them competing for ports and CPU while asserting on timing.
-    maxParallelForks = 1
+  // The protocol tests open real sockets to an in-process server. Running test classes in
+  // parallel would have them competing for ports and CPU while asserting on timing.
+  maxParallelForks = 1
 }
 
 tasks.withType<Jar>().configureEach {
-    // Same inputs, same bytes — so a rebuild of an unchanged commit produces an identical jar.
-    isPreserveFileTimestamps = false
-    isReproducibleFileOrder = true
+  // Same inputs, same bytes — so a rebuild of an unchanged commit produces an identical jar.
+  isPreserveFileTimestamps = false
+  isReproducibleFileOrder = true
 }

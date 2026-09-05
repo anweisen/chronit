@@ -18,32 +18,32 @@ import java.util.ServiceLoader;
  */
 public interface TranslationProvider {
 
-    String id();
+  String id();
 
-    /** Whether a client speaking {@code nativeProtocol} can be translated to {@code targetProtocol}. */
-    boolean canTranslate(int nativeProtocol, int targetProtocol);
+  /** Whether a client speaking {@code nativeProtocol} can be translated to {@code targetProtocol}. */
+  boolean canTranslate(int nativeProtocol, int targetProtocol);
 
-    /**
-     * Resolves a version name such as {@code 1.20.4} to its protocol number.
-     *
-     * @return empty when the name is unknown
-     */
-    OptionalInt resolveVersionName(String versionName);
+  /**
+   * Resolves a version name such as {@code 1.20.4} to its protocol number.
+   *
+   * @return empty when the name is unknown
+   */
+  OptionalInt resolveVersionName(String versionName);
 
-    /** Human-readable version name for a protocol number, for logs. */
-    Optional<String> versionName(int protocol);
+  /** Human-readable version name for a protocol number, for logs. */
+  Optional<String> versionName(int protocol);
 
-    /** All providers on the classpath, in discovery order. */
-    static List<TranslationProvider> discover() {
-        return ServiceLoader.load(TranslationProvider.class).stream()
-                .map(ServiceLoader.Provider::get)
-                .toList();
-    }
+  /** All providers on the classpath, in discovery order. */
+  static List<TranslationProvider> discover() {
+    return ServiceLoader.load(TranslationProvider.class).stream()
+        .map(ServiceLoader.Provider::get)
+        .toList();
+  }
 
-    /** The first provider that can reach {@code targetProtocol}, if any. */
-    static Optional<TranslationProvider> forTarget(int nativeProtocol, int targetProtocol) {
-        return discover().stream()
-                .filter(provider -> provider.canTranslate(nativeProtocol, targetProtocol))
-                .findFirst();
-    }
+  /** The first provider that can reach {@code targetProtocol}, if any. */
+  static Optional<TranslationProvider> forTarget(int nativeProtocol, int targetProtocol) {
+    return discover().stream()
+        .filter(provider -> provider.canTranslate(nativeProtocol, targetProtocol))
+        .findFirst();
+  }
 }

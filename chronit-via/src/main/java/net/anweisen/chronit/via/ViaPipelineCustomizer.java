@@ -19,38 +19,38 @@ import org.slf4j.LoggerFactory;
  */
 public final class ViaPipelineCustomizer implements PipelineCustomizer {
 
-    private static final Logger log = LoggerFactory.getLogger(ViaPipelineCustomizer.class);
+  private static final Logger log = LoggerFactory.getLogger(ViaPipelineCustomizer.class);
 
-    @Override
-    public String id() {
-        return "viaversion";
-    }
+  @Override
+  public String id() {
+    return "viaversion";
+  }
 
-    @Override
-    public boolean canTranslate(int nativeProtocol, int targetProtocol) {
-        ViaBootstrap.ensureInitialised();
-        return ViaVersions.canTranslate(nativeProtocol, targetProtocol);
-    }
+  @Override
+  public boolean canTranslate(int nativeProtocol, int targetProtocol) {
+    ViaBootstrap.ensureInitialised();
+    return ViaVersions.canTranslate(nativeProtocol, targetProtocol);
+  }
 
-    @Override
-    public void customize(Channel channel, int nativeProtocol, int targetProtocol, ServerTarget target) {
-        ViaBootstrap.ensureInitialised();
+  @Override
+  public void customize(Channel channel, int nativeProtocol, int targetProtocol, ServerTarget target) {
+    ViaBootstrap.ensureInitialised();
 
-        ProtocolVersion clientVersion = ProtocolVersion.getProtocol(nativeProtocol);
-        ProtocolVersion serverVersion = ProtocolVersion.getProtocol(targetProtocol);
+    ProtocolVersion clientVersion = ProtocolVersion.getProtocol(nativeProtocol);
+    ProtocolVersion serverVersion = ProtocolVersion.getProtocol(targetProtocol);
 
-        // The version provider reads this back for every packet, so it has to be set before the
-        // pipeline is built.
-        channel.attr(ViaBootstrap.TARGET_VERSION).set(serverVersion);
+    // The version provider reads this back for every packet, so it has to be set before the
+    // pipeline is built.
+    channel.attr(ViaBootstrap.TARGET_VERSION).set(serverVersion);
 
-        UserConnectionImpl connection = new UserConnectionImpl(channel, true);
-        connection.getProtocolInfo().setProtocolVersion(clientVersion);
-        connection.getProtocolInfo().setServerProtocolVersion(serverVersion);
-        new ProtocolPipelineImpl(connection);
+    UserConnectionImpl connection = new UserConnectionImpl(channel, true);
+    connection.getProtocolInfo().setProtocolVersion(clientVersion);
+    connection.getProtocolInfo().setServerProtocolVersion(serverVersion);
+    new ProtocolPipelineImpl(connection);
 
-        channel.pipeline().addLast(new ChronitVLPipeline(connection, serverVersion));
+    channel.pipeline().addLast(new ChronitVLPipeline(connection, serverVersion));
 
-        log.debug("Translating {} -> {} for {}",
-                clientVersion.getName(), serverVersion.getName(), target.address());
-    }
+    log.debug("Translating {} -> {} for {}",
+        clientVersion.getName(), serverVersion.getName(), target.address());
+  }
 }

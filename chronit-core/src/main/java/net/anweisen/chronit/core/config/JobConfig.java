@@ -13,41 +13,41 @@ import java.util.List;
  * @param misfire  what to do about a run that was due while the process was down
  */
 public record JobConfig(
-        String id,
-        String cron,
-        ZoneId timezone,
-        Overlap overlap,
-        Misfire misfire,
-        Boolean enabled,
-        List<VisitConfig> visits) {
+    String id,
+    String cron,
+    ZoneId timezone,
+    Overlap overlap,
+    Misfire misfire,
+    Boolean enabled,
+    List<VisitConfig> visits) {
 
-    public enum Overlap {
-        /** Drop the new run. */
-        SKIP,
-        /** Run it as soon as the previous one finishes. */
-        QUEUE
-    }
+  public enum Overlap {
+    /** Drop the new run. */
+    SKIP,
+    /** Run it as soon as the previous one finishes. */
+    QUEUE
+  }
 
-    public enum Misfire {
-        /** Wait for the next scheduled time. */
-        IGNORE,
-        /** Run once immediately on startup if a fire time was missed while the process was down. */
-        RUN_ONCE
-    }
+  public enum Misfire {
+    /** Wait for the next scheduled time. */
+    IGNORE,
+    /** Run once immediately on startup if a fire time was missed while the process was down. */
+    RUN_ONCE
+  }
 
-    public boolean isEnabled() {
-        return enabled == null || enabled;
-    }
+  public boolean isEnabled() {
+    return enabled == null || enabled;
+  }
 
-    public Overlap overlapOrDefault() {
-        return overlap != null ? overlap : Overlap.SKIP;
-    }
+  public Overlap overlapOrDefault() {
+    return overlap != null ? overlap : Overlap.SKIP;
+  }
 
-    public Misfire misfireOrDefault() {
-        return misfire != null ? misfire : Misfire.IGNORE;
-    }
+  public Misfire misfireOrDefault() {
+    return misfire != null ? misfire : Misfire.IGNORE;
+  }
 
-    public ZoneId zoneOrDefault() {
-        return timezone != null ? timezone : ZoneId.systemDefault();
-    }
+  public ZoneId zoneOrDefault() {
+    return timezone != null ? timezone : ZoneId.systemDefault();
+  }
 }

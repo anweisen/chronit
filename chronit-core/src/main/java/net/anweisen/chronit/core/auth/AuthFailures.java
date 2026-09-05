@@ -28,124 +28,124 @@ import java.util.Set;
  */
 final class AuthFailures {
 
-    /**
-     * OAuth error codes from the Microsoft token endpoint that mean the refresh token is finished.
-     *
-     * <p>{@code invalid_grant} is the one that matters in practice — it covers expiry, revocation
-     * and a password change. The rest are here because they are equally final.
-     */
-    private static final Set<String> FATAL_OAUTH_ERRORS = Set.of(
-            "invalid_grant",
-            "invalid_client",
-            "unauthorized_client",
-            "interaction_required",
-            "consent_required",
-            "expired_token");
+  /**
+   * OAuth error codes from the Microsoft token endpoint that mean the refresh token is finished.
+   *
+   * <p>{@code invalid_grant} is the one that matters in practice — it covers expiry, revocation
+   * and a password change. The rest are here because they are equally final.
+   */
+  private static final Set<String> FATAL_OAUTH_ERRORS = Set.of(
+      "invalid_grant",
+      "invalid_client",
+      "unauthorized_client",
+      "interaction_required",
+      "consent_required",
+      "expired_token");
 
-    /**
-     * Xbox failures that describe the state of the account rather than the session. A fresh login
-     * would hit exactly the same wall, so they are not a reason to prompt for one.
-     */
-    private static final Set<String> ACCOUNT_STATE_ERRORS = Set.of(
-            "XO_E_ENFORCEMENT_BAN",
-            "XO_E_THIRD_PARTY_BAN",
-            "XO_E_ACCOUNT_CREATION_REQUIRED",
-            "XO_E_ACCOUNT_TERMS_OF_USE_NOT_ACCEPTED",
-            "XO_E_ACCOUNT_COUNTRY_NOT_AUTHORIZED",
-            "XO_E_ACCOUNT_AGE_VERIFICATION_REQUIRED",
-            "XO_E_ACCOUNT_PARENTALLY_RESTRICTED",
-            "XO_E_ACCOUNT_CHILD_NOT_IN_FAMILY",
-            "XO_E_ACCOUNT_CURFEW",
-            "XO_E_ACCOUNT_TYPE_NOT_ALLOWED");
+  /**
+   * Xbox failures that describe the state of the account rather than the session. A fresh login
+   * would hit exactly the same wall, so they are not a reason to prompt for one.
+   */
+  private static final Set<String> ACCOUNT_STATE_ERRORS = Set.of(
+      "XO_E_ENFORCEMENT_BAN",
+      "XO_E_THIRD_PARTY_BAN",
+      "XO_E_ACCOUNT_CREATION_REQUIRED",
+      "XO_E_ACCOUNT_TERMS_OF_USE_NOT_ACCEPTED",
+      "XO_E_ACCOUNT_COUNTRY_NOT_AUTHORIZED",
+      "XO_E_ACCOUNT_AGE_VERIFICATION_REQUIRED",
+      "XO_E_ACCOUNT_PARENTALLY_RESTRICTED",
+      "XO_E_ACCOUNT_CHILD_NOT_IN_FAMILY",
+      "XO_E_ACCOUNT_CURFEW",
+      "XO_E_ACCOUNT_TYPE_NOT_ALLOWED");
 
-    private AuthFailures() {
+  private AuthFailures() {
+  }
+
+  static AuthException.Kind classify(Throwable error) {
+    for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      AuthException.Kind kind = classifyOne(cause);
+      if (kind != null) {
+        return kind;
+      }
+      if (cause.getCause() == cause) {
+        break;
+      }
     }
+    return AuthException.Kind.TRANSIENT;
+  }
 
-    static AuthException.Kind classify(Throwable error) {
-        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-            AuthException.Kind kind = classifyOne(cause);
-            if (kind != null) {
-                return kind;
-            }
-            if (cause.getCause() == cause) {
-                break;
-            }
-        }
-        return AuthException.Kind.TRANSIENT;
+  /** @return null when this particular throwable says nothing useful */
+  private static AuthException.Kind classifyOne(Throwable cause) {
+    if (cause instanceof MinecraftProfileNotFoundException) {
+      // The account authenticated fine; it just does not own Java Edition, or has never
+      // picked a name.
+      return AuthException.Kind.PERMANENT;
     }
+    if (cause instanceof XblRequestException xbl) {
+      return ACCOUNT_STATE_ERRORS.contains(xbl.getError())
+          ? AuthException.Kind.PERMANENT
+          : fromStatus(xbl);
+    }
+    if (cause instanceof MsaRequestException msa) {
+      return FATAL_OAUTH_ERRORS.contains(msa.getError())
+          ? AuthException.Kind.NEEDS_LOGIN
+          : fromStatus(msa);
+    }
+    if (cause instanceof ApiHttpRequestException api) {
+      return fromStatus(api);
+    }
+    if (cause instanceof HttpRequestException http) {
+      return fromStatus(http);
+    }
+    if (cause instanceof UnknownHostException
+        || cause instanceof ConnectException
+        || cause instanceof NoRouteToHostException
+        || cause instanceof SocketTimeoutException
+        || cause instanceof InterruptedIOException
+        || cause instanceof SocketException
+        || cause instanceof SSLException) {
+      return AuthException.Kind.TRANSIENT;
+    }
+    if (cause instanceof IllegalStateException && cause.getMessage() != null
+        && cause.getMessage().contains("without a refresh token")) {
+      // The library's own guard: the stored session was created without offline access, so
+      // there is nothing to renew it with.
+      return AuthException.Kind.NEEDS_LOGIN;
+    }
+    return null;
+  }
 
-    /** @return null when this particular throwable says nothing useful */
-    private static AuthException.Kind classifyOne(Throwable cause) {
-        if (cause instanceof MinecraftProfileNotFoundException) {
-            // The account authenticated fine; it just does not own Java Edition, or has never
-            // picked a name.
-            return AuthException.Kind.PERMANENT;
-        }
-        if (cause instanceof XblRequestException xbl) {
-            return ACCOUNT_STATE_ERRORS.contains(xbl.getError())
-                    ? AuthException.Kind.PERMANENT
-                    : fromStatus(xbl);
-        }
-        if (cause instanceof MsaRequestException msa) {
-            return FATAL_OAUTH_ERRORS.contains(msa.getError())
-                    ? AuthException.Kind.NEEDS_LOGIN
-                    : fromStatus(msa);
-        }
-        if (cause instanceof ApiHttpRequestException api) {
-            return fromStatus(api);
-        }
-        if (cause instanceof HttpRequestException http) {
-            return fromStatus(http);
-        }
-        if (cause instanceof UnknownHostException
-                || cause instanceof ConnectException
-                || cause instanceof NoRouteToHostException
-                || cause instanceof SocketTimeoutException
-                || cause instanceof InterruptedIOException
-                || cause instanceof SocketException
-                || cause instanceof SSLException) {
-            return AuthException.Kind.TRANSIENT;
-        }
-        if (cause instanceof IllegalStateException && cause.getMessage() != null
-                && cause.getMessage().contains("without a refresh token")) {
-            // The library's own guard: the stored session was created without offline access, so
-            // there is nothing to renew it with.
-            return AuthException.Kind.NEEDS_LOGIN;
-        }
-        return null;
+  private static AuthException.Kind fromStatus(HttpRequestException error) {
+    int status = error.getResponse() != null ? error.getResponse().getStatusCode() : 0;
+    if (status == 429 || status >= 500) {
+      // Throttling and outages: exactly what a later sweep is for.
+      return AuthException.Kind.TRANSIENT;
     }
+    if (status == 400 || status == 401 || status == 403) {
+      return AuthException.Kind.NEEDS_LOGIN;
+    }
+    return AuthException.Kind.TRANSIENT;
+  }
 
-    private static AuthException.Kind fromStatus(HttpRequestException error) {
-        int status = error.getResponse() != null ? error.getResponse().getStatusCode() : 0;
-        if (status == 429 || status >= 500) {
-            // Throttling and outages: exactly what a later sweep is for.
-            return AuthException.Kind.TRANSIENT;
-        }
-        if (status == 400 || status == 401 || status == 403) {
-            return AuthException.Kind.NEEDS_LOGIN;
-        }
-        return AuthException.Kind.TRANSIENT;
+  /**
+   * A one-line reason fit for a log or the dashboard.
+   *
+   * <p>The library's own messages are built for developers ({@code status: 400 Bad Request,
+   * error: invalid_grant, error message: ...}); the useful half is the description.
+   */
+  static String describe(Throwable error) {
+    for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      if (cause instanceof ApiHttpRequestException api) {
+        String message = api.getErrorMessage();
+        return message != null && !message.isBlank()
+            ? api.getError() + ": " + message
+            : api.getError();
+      }
+      if (cause.getCause() == cause) {
+        break;
+      }
     }
-
-    /**
-     * A one-line reason fit for a log or the dashboard.
-     *
-     * <p>The library's own messages are built for developers ({@code status: 400 Bad Request,
-     * error: invalid_grant, error message: ...}); the useful half is the description.
-     */
-    static String describe(Throwable error) {
-        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-            if (cause instanceof ApiHttpRequestException api) {
-                String message = api.getErrorMessage();
-                return message != null && !message.isBlank()
-                        ? api.getError() + ": " + message
-                        : api.getError();
-            }
-            if (cause.getCause() == cause) {
-                break;
-            }
-        }
-        String message = error.getMessage();
-        return message != null && !message.isBlank() ? message : error.toString();
-    }
+    String message = error.getMessage();
+    return message != null && !message.isBlank() ? message : error.toString();
+  }
 }

@@ -13,14 +13,14 @@ import java.time.Instant;
  * @param directVerificationUri a link with the code already embedded, so there is nothing to type
  */
 public record DeviceCodePrompt(
-        String userCode,
-        String verificationUri,
-        String directVerificationUri,
-        Instant expiresAt) {
+    String userCode,
+    String verificationUri,
+    String directVerificationUri,
+    Instant expiresAt) {
 
-    /** Ready-to-print instructions for the CLI and the container log. */
-    public String describe() {
-        return "Open " + verificationUri + " and enter the code " + userCode
-                + "  (or open " + directVerificationUri + ")";
-    }
+  /** Ready-to-print instructions for the CLI and the container log. */
+  public String describe() {
+    return "Open " + verificationUri + " and enter the code " + userCode
+        + "  (or open " + directVerificationUri + ")";
+  }
 }

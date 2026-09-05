@@ -17,29 +17,29 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public final class AccountLocks {
 
-    private static final Logger log = LoggerFactory.getLogger(AccountLocks.class);
+  private static final Logger log = LoggerFactory.getLogger(AccountLocks.class);
 
-    private final Map<String, ReentrantLock> locks = new ConcurrentHashMap<>();
+  private final Map<String, ReentrantLock> locks = new ConcurrentHashMap<>();
 
-    /** Blocks until the account is free. Close the lease to release it. */
-    public Lease acquire(String accountId) throws InterruptedException {
-        ReentrantLock lock = locks.computeIfAbsent(accountId, ignored -> new ReentrantLock(true));
-        if (!lock.tryLock()) {
-            log.info("Waiting for account '{}' to finish its current visit", accountId);
-            lock.lockInterruptibly();
-        }
-        return () -> lock.unlock();
+  /** Blocks until the account is free. Close the lease to release it. */
+  public Lease acquire(String accountId) throws InterruptedException {
+    ReentrantLock lock = locks.computeIfAbsent(accountId, ignored -> new ReentrantLock(true));
+    if (!lock.tryLock()) {
+      log.info("Waiting for account '{}' to finish its current visit", accountId);
+      lock.lockInterruptibly();
     }
+    return () -> lock.unlock();
+  }
 
-    public boolean isBusy(String accountId) {
-        ReentrantLock lock = locks.get(accountId);
-        return lock != null && lock.isLocked();
-    }
+  public boolean isBusy(String accountId) {
+    ReentrantLock lock = locks.get(accountId);
+    return lock != null && lock.isLocked();
+  }
 
-    /** Released with try-with-resources; never throws. */
-    @FunctionalInterface
-    public interface Lease extends AutoCloseable {
-        @Override
-        void close();
-    }
+  /** Released with try-with-resources; never throws. */
+  @FunctionalInterface
+  public interface Lease extends AutoCloseable {
+    @Override
+    void close();
+  }
 }

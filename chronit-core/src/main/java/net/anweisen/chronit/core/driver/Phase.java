@@ -8,14 +8,14 @@ package net.anweisen.chronit.core.driver;
  * during which commands would be silently dropped.
  */
 public enum Phase {
-    CONNECTING,
-    LOGIN,
-    /** Registries, resource packs, code of conduct — everything the server demands before play. */
-    CONFIGURATION,
-    /** In the play state, waiting for the join packet, the first teleport and initial chunks. */
-    JOINING,
-    /** Fully spawned; commands will be processed. */
-    IN_WORLD,
-    LEAVING,
-    CLOSED
+  CONNECTING,
+  LOGIN,
+  /** Registries, resource packs, code of conduct — everything the server demands before play. */
+  CONFIGURATION,
+  /** In the play state, waiting for the join packet, the first teleport and initial chunks. */
+  JOINING,
+  /** Fully spawned; commands will be processed. */
+  IN_WORLD,
+  LEAVING,
+  CLOSED
 }

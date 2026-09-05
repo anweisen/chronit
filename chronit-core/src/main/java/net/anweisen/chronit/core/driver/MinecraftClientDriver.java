@@ -15,30 +15,30 @@ import java.time.Duration;
  */
 public interface MinecraftClientDriver {
 
-    /** Stable identifier for logs, e.g. {@code mcpl-26.2}. */
-    String id();
+  /** Stable identifier for logs, e.g. {@code mcpl-26.2}. */
+  String id();
 
-    /** The Minecraft version this driver natively speaks, e.g. {@code 26.2}. */
-    String nativeVersionName();
+  /** The Minecraft version this driver natively speaks, e.g. {@code 26.2}. */
+  String nativeVersionName();
 
-    /** The protocol number this driver natively speaks. */
-    int nativeProtocol();
+  /** The protocol number this driver natively speaks. */
+  int nativeProtocol();
 
-    /**
-     * Performs a server list ping.
-     *
-     * <p>Note that the reported protocol is the server's own, not the range it accepts: a server
-     * running a version-compatibility plugin advertises its native version while happily accepting
-     * far newer clients.
-     */
-    ServerStatus ping(ServerTarget target, Duration timeout) throws DriverException;
+  /**
+   * Performs a server list ping.
+   *
+   * <p>Note that the reported protocol is the server's own, not the range it accepts: a server
+   * running a version-compatibility plugin advertises its native version while happily accepting
+   * far newer clients.
+   */
+  ServerStatus ping(ServerTarget target, Duration timeout) throws DriverException;
 
-    /**
-     * Opens a session. Returns as soon as the connection attempt has started; use
-     * {@link ClientHandle#whenReady()} to await the join.
-     */
-    ClientHandle connect(ConnectRequest request, ClientEvents events) throws DriverException;
+  /**
+   * Opens a session. Returns as soon as the connection attempt has started; use
+   * {@link ClientHandle#whenReady()} to await the join.
+   */
+  ClientHandle connect(ConnectRequest request, ClientEvents events) throws DriverException;
 
-    /** Releases shared resources such as event loop groups. */
-    void shutdown();
+  /** Releases shared resources such as event loop groups. */
+  void shutdown();
 }

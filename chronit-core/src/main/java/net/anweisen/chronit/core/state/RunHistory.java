@@ -26,79 +26,79 @@ import java.util.List;
  */
 public final class RunHistory {
 
-    private static final Logger log = LoggerFactory.getLogger(RunHistory.class);
+  private static final Logger log = LoggerFactory.getLogger(RunHistory.class);
 
-    private static final int IN_MEMORY_LIMIT = 200;
+  private static final int IN_MEMORY_LIMIT = 200;
 
-    private final Path file;
-    private final ObjectMapper mapper;
-    private final Deque<RunRecord> recent = new ArrayDeque<>();
+  private final Path file;
+  private final ObjectMapper mapper;
+  private final Deque<RunRecord> recent = new ArrayDeque<>();
 
-    public RunHistory(Path stateDir) {
-        this.file = stateDir.resolve("state").resolve("history.jsonl");
-        this.mapper = new ObjectMapper()
-                .registerModule(new JavaTimeModule())
-                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        loadRecent();
+  public RunHistory(Path stateDir) {
+    this.file = stateDir.resolve("state").resolve("history.jsonl");
+    this.mapper = new ObjectMapper()
+        .registerModule(new JavaTimeModule())
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    loadRecent();
+  }
+
+  public synchronized void append(RunRecord record) {
+    recent.addLast(record);
+    while (recent.size() > IN_MEMORY_LIMIT) {
+      recent.removeFirst();
     }
+    try {
+      Path parent = file.getParent();
+      if (parent != null) {
+        Files.createDirectories(parent);
+      }
+      String line = mapper.writeValueAsString(record) + System.lineSeparator();
+      Files.writeString(file, line, StandardCharsets.UTF_8,
+          StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+    } catch (IOException e) {
+      // History is diagnostics, not correctness — never let it fail a run.
+      log.warn("Could not append to the run history at {}: {}", file, e.toString());
+    }
+  }
 
-    public synchronized void append(RunRecord record) {
-        recent.addLast(record);
-        while (recent.size() > IN_MEMORY_LIMIT) {
-            recent.removeFirst();
+  /** Most recent first. */
+  public synchronized List<RunRecord> recent(int limit) {
+    if (limit <= 0) {
+      return List.of();
+    }
+    List<RunRecord> newestFirst = new ArrayList<>(Math.min(limit, recent.size()));
+    Iterator<RunRecord> backwards = recent.descendingIterator();
+    while (backwards.hasNext() && newestFirst.size() < limit) {
+      newestFirst.add(backwards.next());
+    }
+    return List.copyOf(newestFirst);
+  }
+
+  public Path file() {
+    return file;
+  }
+
+  private void loadRecent() {
+    if (!Files.isReadable(file)) {
+      return;
+    }
+    try (var lines = Files.lines(file, StandardCharsets.UTF_8)) {
+      lines.forEach(line -> {
+        if (line.isBlank()) {
+          return;
         }
         try {
-            Path parent = file.getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
-            String line = mapper.writeValueAsString(record) + System.lineSeparator();
-            Files.writeString(file, line, StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+          recent.addLast(mapper.readValue(line, RunRecord.class));
+          if (recent.size() > IN_MEMORY_LIMIT) {
+            recent.removeFirst();
+          }
         } catch (IOException e) {
-            // History is diagnostics, not correctness — never let it fail a run.
-            log.warn("Could not append to the run history at {}: {}", file, e.toString());
+          // A partially written final line from a hard kill; skipping it is correct.
+          log.debug("Skipping unreadable history line: {}", e.toString());
         }
+      });
+    } catch (IOException e) {
+      log.warn("Could not read the run history at {}: {}", file, e.toString());
     }
-
-    /** Most recent first. */
-    public synchronized List<RunRecord> recent(int limit) {
-        if (limit <= 0) {
-            return List.of();
-        }
-        List<RunRecord> newestFirst = new ArrayList<>(Math.min(limit, recent.size()));
-        Iterator<RunRecord> backwards = recent.descendingIterator();
-        while (backwards.hasNext() && newestFirst.size() < limit) {
-            newestFirst.add(backwards.next());
-        }
-        return List.copyOf(newestFirst);
-    }
-
-    public Path file() {
-        return file;
-    }
-
-    private void loadRecent() {
-        if (!Files.isReadable(file)) {
-            return;
-        }
-        try (var lines = Files.lines(file, StandardCharsets.UTF_8)) {
-            lines.forEach(line -> {
-                if (line.isBlank()) {
-                    return;
-                }
-                try {
-                    recent.addLast(mapper.readValue(line, RunRecord.class));
-                    if (recent.size() > IN_MEMORY_LIMIT) {
-                        recent.removeFirst();
-                    }
-                } catch (IOException e) {
-                    // A partially written final line from a hard kill; skipping it is correct.
-                    log.debug("Skipping unreadable history line: {}", e.toString());
-                }
-            });
-        } catch (IOException e) {
-            log.warn("Could not read the run history at {}: {}", file, e.toString());
-        }
-    }
+  }
 }

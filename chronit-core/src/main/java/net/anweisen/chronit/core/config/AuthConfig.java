@@ -22,52 +22,52 @@ import java.time.Duration;
  *                        against Mojang during the join, and the join is not instant
  */
 public record AuthConfig(
-        Boolean refreshOnStart,
-        Duration refreshInterval,
-        Duration refreshMargin) {
+    Boolean refreshOnStart,
+    Duration refreshInterval,
+    Duration refreshMargin) {
 
-    /**
-     * Six hours between sweeps keeps the ninety-day window open with three orders of magnitude to
-     * spare while costing a handful of requests a day, and a half-hour margin is far longer than
-     * any join sequence.
-     */
-    public static final AuthConfig DEFAULTS =
-            new AuthConfig(Boolean.TRUE, Duration.ofHours(6), Duration.ofMinutes(30));
+  /**
+   * Six hours between sweeps keeps the ninety-day window open with three orders of magnitude to
+   * spare while costing a handful of requests a day, and a half-hour margin is far longer than
+   * any join sequence.
+   */
+  public static final AuthConfig DEFAULTS =
+      new AuthConfig(Boolean.TRUE, Duration.ofHours(6), Duration.ofMinutes(30));
 
-    /**
-     * How long a Microsoft refresh token survives without being used.
-     *
-     * <p>Microsoft documents ninety days for everything except single-page applications. It is not
-     * reported by the API, so it can only be counted from the last successful refresh.
-     */
-    public static final Duration SESSION_LIFETIME = Duration.ofDays(90);
+  /**
+   * How long a Microsoft refresh token survives without being used.
+   *
+   * <p>Microsoft documents ninety days for everything except single-page applications. It is not
+   * reported by the API, so it can only be counted from the last successful refresh.
+   */
+  public static final Duration SESSION_LIFETIME = Duration.ofDays(90);
 
-    public boolean refreshOnStartOrDefault() {
-        return refreshOnStart != null ? refreshOnStart : DEFAULTS.refreshOnStart();
-    }
+  public boolean refreshOnStartOrDefault() {
+    return refreshOnStart != null ? refreshOnStart : DEFAULTS.refreshOnStart();
+  }
 
-    public Duration refreshIntervalOrDefault() {
-        return refreshInterval != null ? refreshInterval : DEFAULTS.refreshInterval();
-    }
+  public Duration refreshIntervalOrDefault() {
+    return refreshInterval != null ? refreshInterval : DEFAULTS.refreshInterval();
+  }
 
-    public Duration refreshMarginOrDefault() {
-        return refreshMargin != null ? refreshMargin : DEFAULTS.refreshMargin();
-    }
+  public Duration refreshMarginOrDefault() {
+    return refreshMargin != null ? refreshMargin : DEFAULTS.refreshMargin();
+  }
 
-    public boolean isBackgroundRefreshEnabled() {
-        Duration interval = refreshIntervalOrDefault();
-        return !interval.isZero() && !interval.isNegative();
-    }
+  public boolean isBackgroundRefreshEnabled() {
+    Duration interval = refreshIntervalOrDefault();
+    return !interval.isZero() && !interval.isNegative();
+  }
 
-    /**
-     * How far ahead the background sweep looks.
-     *
-     * <p>A margin alone is not enough for a sweep: with a half-hour margin and a six-hour interval,
-     * a token would have to expire inside a half-hour window that the sweep only visits every six
-     * hours, so most of the time it would expire unnoticed. Looking one whole interval further
-     * ahead means anything that would lapse before the next sweep is dealt with by this one.
-     */
-    public Duration sweepHorizon() {
-        return refreshIntervalOrDefault().plus(refreshMarginOrDefault());
-    }
+  /**
+   * How far ahead the background sweep looks.
+   *
+   * <p>A margin alone is not enough for a sweep: with a half-hour margin and a six-hour interval,
+   * a token would have to expire inside a half-hour window that the sweep only visits every six
+   * hours, so most of the time it would expire unnoticed. Looking one whole interval further
+   * ahead means anything that would lapse before the next sweep is dealt with by this one.
+   */
+  public Duration sweepHorizon() {
+    return refreshIntervalOrDefault().plus(refreshMarginOrDefault());
+  }
 }

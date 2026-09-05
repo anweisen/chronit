@@ -19,45 +19,45 @@ import java.time.Duration;
  * @param onTimeout what to do when it never happens
  */
 public record WaitForConfig(
-        String chat,
-        String screen,
-        Duration timeout,
-        OnTimeout onTimeout) {
+    String chat,
+    String screen,
+    Duration timeout,
+    OnTimeout onTimeout) {
 
-    public enum OnTimeout {
-        /** Carry on with the next action. */
-        CONTINUE,
-        /** Stop the sequence but treat the visit as successful. */
-        STOP,
-        /** Fail the visit, triggering the configured retry policy. */
-        FAIL
-    }
+  public enum OnTimeout {
+    /** Carry on with the next action. */
+    CONTINUE,
+    /** Stop the sequence but treat the visit as successful. */
+    STOP,
+    /** Fail the visit, triggering the configured retry policy. */
+    FAIL
+  }
 
-    public enum Subject { CHAT, SCREEN }
+  public enum Subject { CHAT, SCREEN }
 
-    public Subject subject() {
-        return screen != null ? Subject.SCREEN : Subject.CHAT;
-    }
+  public Subject subject() {
+    return screen != null ? Subject.SCREEN : Subject.CHAT;
+  }
 
-    /** The regular expression to match, whichever subject was configured. */
-    public String pattern() {
-        return screen != null ? screen : chat;
-    }
+  /** The regular expression to match, whichever subject was configured. */
+  public String pattern() {
+    return screen != null ? screen : chat;
+  }
 
-    public Duration timeoutOrDefault() {
-        return timeout != null ? timeout : Duration.ofSeconds(15);
-    }
+  public Duration timeoutOrDefault() {
+    return timeout != null ? timeout : Duration.ofSeconds(15);
+  }
 
-    public OnTimeout onTimeoutOrDefault() {
-        return onTimeout != null ? onTimeout : OnTimeout.CONTINUE;
-    }
+  public OnTimeout onTimeoutOrDefault() {
+    return onTimeout != null ? onTimeout : OnTimeout.CONTINUE;
+  }
 
-    public String describe() {
-        return switch (subject()) {
-            case CHAT -> "a message matching /" + chat + "/";
-            case SCREEN -> screen.isEmpty()
-                    ? "a menu to open"
-                    : "a menu titled /" + screen + "/";
-        };
-    }
+  public String describe() {
+    return switch (subject()) {
+      case CHAT -> "a message matching /" + chat + "/";
+      case SCREEN -> screen.isEmpty()
+          ? "a menu to open"
+          : "a menu titled /" + screen + "/";
+    };
+  }
 }

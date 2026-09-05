@@ -22,45 +22,45 @@ import java.util.concurrent.Executor;
  */
 final class TranslatingClientSession extends ClientNetworkSession {
 
-    private final PipelineCustomizer customizer;
-    private final int nativeProtocol;
-    private final int targetProtocol;
-    private final ServerTarget target;
+  private final PipelineCustomizer customizer;
+  private final int nativeProtocol;
+  private final int targetProtocol;
+  private final ServerTarget target;
 
-    TranslatingClientSession(SocketAddress remoteAddress,
-                             MinecraftProtocol protocol,
-                             Executor packetHandlerExecutor,
-                             SocketAddress bindAddress,
-                             ProxyInfo proxy,
-                             PipelineCustomizer customizer,
-                             int nativeProtocol,
-                             int targetProtocol,
-                             ServerTarget target) {
-        super(remoteAddress, protocol, packetHandlerExecutor, bindAddress, proxy);
-        this.customizer = customizer;
-        this.nativeProtocol = nativeProtocol;
-        this.targetProtocol = targetProtocol;
-        this.target = target;
-    }
+  TranslatingClientSession(SocketAddress remoteAddress,
+                           MinecraftProtocol protocol,
+                           Executor packetHandlerExecutor,
+                           SocketAddress bindAddress,
+                           ProxyInfo proxy,
+                           PipelineCustomizer customizer,
+                           int nativeProtocol,
+                           int targetProtocol,
+                           ServerTarget target) {
+    super(remoteAddress, protocol, packetHandlerExecutor, bindAddress, proxy);
+    this.customizer = customizer;
+    this.nativeProtocol = nativeProtocol;
+    this.targetProtocol = targetProtocol;
+    this.target = target;
+  }
 
-    @Override
-    protected ChannelHandler getChannelHandler() {
-        return new MinecraftChannelInitializer<>(channel -> {
-            MinecraftProtocol protocol = getPacketProtocol();
-            protocol.newClientSession(TranslatingClientSession.this);
-            return TranslatingClientSession.this;
-        }, true) {
-            @Override
-            public void initChannel(@NonNull Channel channel) throws Exception {
-                NettyHelper.addProxy(getProxy(), channel.pipeline());
-                NettyHelper.initializeHAProxySupport(TranslatingClientSession.this, channel);
+  @Override
+  protected ChannelHandler getChannelHandler() {
+    return new MinecraftChannelInitializer<>(channel -> {
+      MinecraftProtocol protocol = getPacketProtocol();
+      protocol.newClientSession(TranslatingClientSession.this);
+      return TranslatingClientSession.this;
+    }, true) {
+      @Override
+      public void initChannel(@NonNull Channel channel) throws Exception {
+        NettyHelper.addProxy(getProxy(), channel.pipeline());
+        NettyHelper.initializeHAProxySupport(TranslatingClientSession.this, channel);
 
-                super.initChannel(channel);
+        super.initChannel(channel);
 
-                // After the standard handlers exist, so the customizer can position itself
-                // relative to them.
-                customizer.customize(channel, nativeProtocol, targetProtocol, target);
-            }
-        };
-    }
+        // After the standard handlers exist, so the customizer can position itself
+        // relative to them.
+        customizer.customize(channel, nativeProtocol, targetProtocol, target);
+      }
+    };
+  }
 }

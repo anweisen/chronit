@@ -7,11 +7,11 @@ package net.anweisen.chronit.core.config;
  * direct route to the server.
  */
 public record ProxyConfig(
-        Type type,
-        String host,
-        int port,
-        String username,
-        String password) {
+    Type type,
+    String host,
+    int port,
+    String username,
+    String password) {
 
-    public enum Type { SOCKS4, SOCKS5, HTTP }
+  public enum Type { SOCKS4, SOCKS5, HTTP }
 }

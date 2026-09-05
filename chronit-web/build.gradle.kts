@@ -1,5 +1,5 @@
 plugins {
-    id("chronit.java-conventions")
+  id("chronit.java-conventions")
 }
 
 description = "Optional status and login web interface"
@@ -8,11 +8,11 @@ description = "Optional status and login web interface"
 // interface is a handful of server-rendered pages; a framework would add several megabytes to the
 // image and an API-churn risk for no benefit at this size.
 dependencies {
-    // WebInterface's constructor takes core types.
-    api(project(":chronit-core"))
+  // WebInterface's constructor takes core types.
+  api(project(":chronit-core"))
 
-    implementation(libs.slf4j.api)
+  implementation(libs.slf4j.api)
 
-    testImplementation(libs.junit.jupiter)
-    testRuntimeOnly(libs.junit.platform.launcher)
+  testImplementation(libs.junit.jupiter)
+  testRuntimeOnly(libs.junit.platform.launcher)
 }

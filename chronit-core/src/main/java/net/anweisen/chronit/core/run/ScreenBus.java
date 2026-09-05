@@ -13,15 +13,15 @@ import java.util.regex.Pattern;
  */
 public final class ScreenBus extends SignalBus<ContainerInfo> {
 
-    /**
-     * Starts listening for a container whose title matches {@code pattern} and whose contents have
-     * arrived.
-     *
-     * <p>Register this before sending the command that opens the menu — servers often open it
-     * within a millisecond or two.
-     */
-    public SignalWaiter<ContainerInfo> expect(Pattern pattern) {
-        return expect(container ->
-                container.contentsReceived() && pattern.matcher(container.title()).find());
-    }
+  /**
+   * Starts listening for a container whose title matches {@code pattern} and whose contents have
+   * arrived.
+   *
+   * <p>Register this before sending the command that opens the menu — servers often open it
+   * within a millisecond or two.
+   */
+  public SignalWaiter<ContainerInfo> expect(Pattern pattern) {
+    return expect(container ->
+        container.contentsReceived() && pattern.matcher(container.title()).find());
+  }
 }

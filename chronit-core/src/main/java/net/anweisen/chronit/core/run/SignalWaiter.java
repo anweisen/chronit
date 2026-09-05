@@ -15,37 +15,37 @@ import java.util.function.Predicate;
  */
 public final class SignalWaiter<T> implements AutoCloseable {
 
-    private final Predicate<T> matcher;
-    private final Consumer<SignalWaiter<T>> onClose;
-    final CompletableFuture<T> future = new CompletableFuture<>();
+  private final Predicate<T> matcher;
+  private final Consumer<SignalWaiter<T>> onClose;
+  final CompletableFuture<T> future = new CompletableFuture<>();
 
-    SignalWaiter(Predicate<T> matcher, Consumer<SignalWaiter<T>> onClose) {
-        this.matcher = matcher;
-        this.onClose = onClose;
-    }
+  SignalWaiter(Predicate<T> matcher, Consumer<SignalWaiter<T>> onClose) {
+    this.matcher = matcher;
+    this.onClose = onClose;
+  }
 
-    void offer(T signal) {
-        if (!future.isDone() && matcher.test(signal)) {
-            future.complete(signal);
-        }
+  void offer(T signal) {
+    if (!future.isDone() && matcher.test(signal)) {
+      future.complete(signal);
     }
+  }
 
-    /**
-     * Blocks until a matching signal arrives.
-     *
-     * @throws TimeoutException if none arrives in time, or the wait was abandoned because the
-     *                          session ended
-     */
-    public T await(Duration timeout) throws InterruptedException, TimeoutException {
-        try {
-            return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (ExecutionException e) {
-            throw new TimeoutException("Wait abandoned: " + e.getCause().getMessage());
-        }
+  /**
+   * Blocks until a matching signal arrives.
+   *
+   * @throws TimeoutException if none arrives in time, or the wait was abandoned because the
+   *                          session ended
+   */
+  public T await(Duration timeout) throws InterruptedException, TimeoutException {
+    try {
+      return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (ExecutionException e) {
+      throw new TimeoutException("Wait abandoned: " + e.getCause().getMessage());
     }
+  }
 
-    @Override
-    public void close() {
-        onClose.accept(this);
-    }
+  @Override
+  public void close() {
+    onClose.accept(this);
+  }
 }

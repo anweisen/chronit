@@ -14,8 +14,8 @@ import net.anweisen.chronit.core.util.Redactor;
  */
 public final class RedactingConverter extends CompositeConverter<ILoggingEvent> {
 
-    @Override
-    protected String transform(ILoggingEvent event, String rendered) {
-        return Redactor.redact(rendered);
-    }
+  @Override
+  protected String transform(ILoggingEvent event, String rendered) {
+    return Redactor.redact(rendered);
+  }
 }

@@ -18,26 +18,26 @@ import java.util.OptionalInt;
  */
 public final class ViaTranslationProvider implements TranslationProvider {
 
-    @Override
-    public String id() {
-        return "viaversion";
-    }
+  @Override
+  public String id() {
+    return "viaversion";
+  }
 
-    @Override
-    public boolean canTranslate(int nativeProtocol, int targetProtocol) {
-        ViaBootstrap.ensureInitialised();
-        return ViaVersions.canTranslate(nativeProtocol, targetProtocol);
-    }
+  @Override
+  public boolean canTranslate(int nativeProtocol, int targetProtocol) {
+    ViaBootstrap.ensureInitialised();
+    return ViaVersions.canTranslate(nativeProtocol, targetProtocol);
+  }
 
-    @Override
-    public OptionalInt resolveVersionName(String versionName) {
-        ViaBootstrap.ensureInitialised();
-        return ViaVersions.resolveVersionName(versionName);
-    }
+  @Override
+  public OptionalInt resolveVersionName(String versionName) {
+    ViaBootstrap.ensureInitialised();
+    return ViaVersions.resolveVersionName(versionName);
+  }
 
-    @Override
-    public Optional<String> versionName(int protocol) {
-        ViaBootstrap.ensureInitialised();
-        return ViaVersions.versionName(protocol);
-    }
+  @Override
+  public Optional<String> versionName(int protocol) {
+    ViaBootstrap.ensureInitialised();
+    return ViaVersions.versionName(protocol);
+  }
 }

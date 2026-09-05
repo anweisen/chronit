@@ -8,9 +8,9 @@ package net.anweisen.chronit.core.driver;
  *                        provider and sets {@code translated}
  */
 public record ConnectRequest(
-        ServerTarget target,
-        AuthContext auth,
-        SessionSettings settings,
-        int protocolVersion,
-        boolean translated) {
+    ServerTarget target,
+    AuthContext auth,
+    SessionSettings settings,
+    int protocolVersion,
+    boolean translated) {
 }

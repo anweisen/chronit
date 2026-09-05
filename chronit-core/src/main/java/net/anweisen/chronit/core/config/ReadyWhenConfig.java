@@ -18,29 +18,29 @@ import java.time.Duration;
  * @param timeout   give up on the visit if readiness is not reached within this time
  */
 public record ReadyWhenConfig(
-        Boolean spawn,
-        Integer minChunks,
-        String chat,
-        Duration settle,
-        Duration timeout) {
+    Boolean spawn,
+    Integer minChunks,
+    String chat,
+    Duration settle,
+    Duration timeout) {
 
-    public static final ReadyWhenConfig DEFAULTS = new ReadyWhenConfig(
-            Boolean.TRUE,
-            0,
-            null,
-            Duration.ofSeconds(2),
-            Duration.ofSeconds(60));
+  public static final ReadyWhenConfig DEFAULTS = new ReadyWhenConfig(
+      Boolean.TRUE,
+      0,
+      null,
+      Duration.ofSeconds(2),
+      Duration.ofSeconds(60));
 
-    /** Returns a copy with every unset field taken from {@code base}. */
-    public ReadyWhenConfig withFallback(ReadyWhenConfig base) {
-        if (base == null) {
-            return this;
-        }
-        return new ReadyWhenConfig(
-                spawn != null ? spawn : base.spawn,
-                minChunks != null ? minChunks : base.minChunks,
-                chat != null ? chat : base.chat,
-                settle != null ? settle : base.settle,
-                timeout != null ? timeout : base.timeout);
+  /** Returns a copy with every unset field taken from {@code base}. */
+  public ReadyWhenConfig withFallback(ReadyWhenConfig base) {
+    if (base == null) {
+      return this;
     }
+    return new ReadyWhenConfig(
+        spawn != null ? spawn : base.spawn,
+        minChunks != null ? minChunks : base.minChunks,
+        chat != null ? chat : base.chat,
+        settle != null ? settle : base.settle,
+        timeout != null ? timeout : base.timeout);
+  }
 }

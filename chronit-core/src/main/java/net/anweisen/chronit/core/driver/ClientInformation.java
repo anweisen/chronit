@@ -10,21 +10,21 @@ import java.util.List;
  * Drivers translate them.
  */
 public record ClientInformation(
-        String locale,
-        int viewDistance,
-        ChatVisibility chatVisibility,
-        boolean chatColors,
-        List<SkinPart> skinParts,
-        MainHand mainHand,
-        boolean textFiltering,
-        boolean allowServerListings,
-        ParticleStatus particleStatus) {
+    String locale,
+    int viewDistance,
+    ChatVisibility chatVisibility,
+    boolean chatColors,
+    List<SkinPart> skinParts,
+    MainHand mainHand,
+    boolean textFiltering,
+    boolean allowServerListings,
+    ParticleStatus particleStatus) {
 
-    public enum ChatVisibility { FULL, SYSTEM, HIDDEN }
+  public enum ChatVisibility { FULL, SYSTEM, HIDDEN }
 
-    public enum MainHand { LEFT, RIGHT }
+  public enum MainHand { LEFT, RIGHT }
 
-    public enum ParticleStatus { ALL, DECREASED, MINIMAL }
+  public enum ParticleStatus { ALL, DECREASED, MINIMAL }
 
-    public enum SkinPart { CAPE, JACKET, LEFT_SLEEVE, RIGHT_SLEEVE, LEFT_PANTS_LEG, RIGHT_PANTS_LEG, HAT }
+  public enum SkinPart { CAPE, JACKET, LEFT_SLEEVE, RIGHT_SLEEVE, LEFT_PANTS_LEG, RIGHT_PANTS_LEG, HAT }
 }

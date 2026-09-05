@@ -15,24 +15,24 @@ import java.util.UUID;
  * @param elapsed   time since the pack was pushed
  */
 public record ResourcePackEvent(
-        UUID id,
-        String url,
-        String hash,
-        boolean required,
-        String prompt,
-        Status status,
-        long sizeBytes,
-        Duration elapsed) {
+    UUID id,
+    String url,
+    String hash,
+    boolean required,
+    String prompt,
+    Status status,
+    long sizeBytes,
+    Duration elapsed) {
 
-    /** Mirrors the wire enum; the driver maps it. */
-    public enum Status {
-        ACCEPTED,
-        DOWNLOADED,
-        SUCCESSFULLY_LOADED,
-        DECLINED,
-        FAILED_DOWNLOAD,
-        INVALID_URL,
-        FAILED_RELOAD,
-        DISCARDED
-    }
+  /** Mirrors the wire enum; the driver maps it. */
+  public enum Status {
+    ACCEPTED,
+    DOWNLOADED,
+    SUCCESSFULLY_LOADED,
+    DECLINED,
+    FAILED_DOWNLOAD,
+    INVALID_URL,
+    FAILED_RELOAD,
+    DISCARDED
+  }
 }

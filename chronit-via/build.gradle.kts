@@ -1,5 +1,5 @@
 plugins {
-    id("chronit.java-conventions")
+  id("chronit.java-conventions")
 }
 
 description = "Optional ViaVersion translation, letting the native client speak older server protocols"
@@ -8,16 +8,16 @@ description = "Optional ViaVersion translation, letting the native client speak 
 // at runtime through ServiceLoader. Removing this module from settings.gradle.kts leaves a working
 // single-version application.
 dependencies {
-    // Implements SPIs from both.
-    api(project(":chronit-core"))
-    api(project(":chronit-driver-mcpl"))
+  // Implements SPIs from both.
+  api(project(":chronit-core"))
+  api(project(":chronit-driver-mcpl"))
 
-    implementation(libs.vialoader)
-    implementation(libs.viaversion)
-    implementation(libs.viabackwards)
+  implementation(libs.vialoader)
+  implementation(libs.viaversion)
+  implementation(libs.viabackwards)
 
-    implementation(libs.slf4j.api)
+  implementation(libs.slf4j.api)
 
-    testImplementation(libs.junit.jupiter)
-    testRuntimeOnly(libs.junit.platform.launcher)
+  testImplementation(libs.junit.jupiter)
+  testRuntimeOnly(libs.junit.platform.launcher)
 }

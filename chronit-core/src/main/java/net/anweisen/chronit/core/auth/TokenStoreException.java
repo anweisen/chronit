@@ -9,11 +9,11 @@ package net.anweisen.chronit.core.auth;
  */
 public class TokenStoreException extends RuntimeException {
 
-    public TokenStoreException(String message) {
-        super(message);
-    }
+  public TokenStoreException(String message) {
+    super(message);
+  }
 
-    public TokenStoreException(String message, Throwable cause) {
-        super(message, cause);
-    }
+  public TokenStoreException(String message, Throwable cause) {
+    super(message, cause);
+  }
 }

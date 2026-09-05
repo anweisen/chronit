@@ -15,24 +15,24 @@ import java.nio.file.Path;
  *                   library's built-in official client ID; override to use your own registration
  */
 public record AccountConfig(
-        String id,
-        AuthMode auth,
-        String username,
-        Path tokenStore,
-        String clientId) {
+    String id,
+    AuthMode auth,
+    String username,
+    Path tokenStore,
+    String clientId) {
 
-    public enum AuthMode {
-        /** Microsoft account via the OAuth2 device code flow. Required for online-mode servers. */
-        MICROSOFT,
-        /**
-         * No authentication; the username is sent as-is and the UUID derived the same way vanilla
-         * derives it offline. Only works against servers with {@code online-mode=false}, which
-         * makes it the right choice for local testing.
-         */
-        OFFLINE
-    }
+  public enum AuthMode {
+    /** Microsoft account via the OAuth2 device code flow. Required for online-mode servers. */
+    MICROSOFT,
+    /**
+     * No authentication; the username is sent as-is and the UUID derived the same way vanilla
+     * derives it offline. Only works against servers with {@code online-mode=false}, which
+     * makes it the right choice for local testing.
+     */
+    OFFLINE
+  }
 
-    public AuthMode authOrDefault() {
-        return auth != null ? auth : AuthMode.MICROSOFT;
-    }
+  public AuthMode authOrDefault() {
+    return auth != null ? auth : AuthMode.MICROSOFT;
+  }
 }

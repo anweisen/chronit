@@ -9,27 +9,27 @@ package net.anweisen.chronit.core.config;
  *              is refused unless the listener is bound to loopback
  */
 public record WebConfig(
-        Boolean enabled,
-        String bind,
-        Integer port,
-        String token) {
+    Boolean enabled,
+    String bind,
+    Integer port,
+    String token) {
 
-    public static final WebConfig DISABLED = new WebConfig(Boolean.FALSE, "127.0.0.1", 8477, null);
+  public static final WebConfig DISABLED = new WebConfig(Boolean.FALSE, "127.0.0.1", 8477, null);
 
-    public boolean isEnabled() {
-        return enabled != null && enabled;
-    }
+  public boolean isEnabled() {
+    return enabled != null && enabled;
+  }
 
-    public String bindOrDefault() {
-        return bind != null ? bind : "127.0.0.1";
-    }
+  public String bindOrDefault() {
+    return bind != null ? bind : "127.0.0.1";
+  }
 
-    public int portOrDefault() {
-        return port != null ? port : 8477;
-    }
+  public int portOrDefault() {
+    return port != null ? port : 8477;
+  }
 
-    public boolean isLoopbackOnly() {
-        String b = bindOrDefault();
-        return b.equals("127.0.0.1") || b.equals("::1") || b.equalsIgnoreCase("localhost");
-    }
+  public boolean isLoopbackOnly() {
+    String b = bindOrDefault();
+    return b.equals("127.0.0.1") || b.equals("::1") || b.equalsIgnoreCase("localhost");
+  }
 }

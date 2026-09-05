@@ -10,12 +10,12 @@ package net.anweisen.chronit.core.state;
  */
 public enum VisitStatus {
 
-    SUCCEEDED,
-    FAILED,
+  SUCCEEDED,
+  FAILED,
 
-    /** The operator stopped the job while this visit was in progress. */
-    CANCELLED,
+  /** The operator stopped the job while this visit was in progress. */
+  CANCELLED,
 
-    /** Never attempted, because the job stopped or was abandoned before reaching it. */
-    SKIPPED
+  /** Never attempted, because the job stopped or was abandoned before reaching it. */
+  SKIPPED
 }

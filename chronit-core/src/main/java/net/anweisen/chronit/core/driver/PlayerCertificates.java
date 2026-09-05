@@ -15,17 +15,17 @@ import java.time.Instant;
  * @param expiresAt          certificates are short-lived and re-fetched with the access token
  */
 public record PlayerCertificates(
-        PublicKey publicKey,
-        PrivateKey privateKey,
-        byte[] publicKeySignature,
-        Instant expiresAt) {
+    PublicKey publicKey,
+    PrivateKey privateKey,
+    byte[] publicKeySignature,
+    Instant expiresAt) {
 
-    public boolean isUsable() {
-        return publicKey != null
-                && privateKey != null
-                && publicKeySignature != null
-                && publicKeySignature.length > 0
-                && expiresAt != null
-                && expiresAt.isAfter(Instant.now());
-    }
+  public boolean isUsable() {
+    return publicKey != null
+        && privateKey != null
+        && publicKeySignature != null
+        && publicKeySignature.length > 0
+        && expiresAt != null
+        && expiresAt.isAfter(Instant.now());
+  }
 }

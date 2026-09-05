@@ -9,10 +9,10 @@ import java.time.Duration;
  *                        when translation was used
  */
 public record ReadyInfo(
-        int entityId,
-        String dimension,
-        int chunksReceived,
-        int protocolVersion,
-        boolean translated,
-        Duration timeToReady) {
+    int entityId,
+    String dimension,
+    int chunksReceived,
+    int protocolVersion,
+    boolean translated,
+    Duration timeToReady) {
 }

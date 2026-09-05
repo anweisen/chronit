@@ -39,179 +39,179 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 final class LiveFeed implements AutoCloseable {
 
-    private static final Logger log = LoggerFactory.getLogger(LiveFeed.class);
+  private static final Logger log = LoggerFactory.getLogger(LiveFeed.class);
 
-    /**
-     * A comment line on an idle stream. Without it an intermediary with an idle timeout — nginx
-     * defaults to a minute — closes a stream that is merely quiet, and the page spends its life
-     * reconnecting.
-     */
-    private static final Duration HEARTBEAT = Duration.ofSeconds(20);
+  /**
+   * A comment line on an idle stream. Without it an intermediary with an idle timeout — nginx
+   * defaults to a minute — closes a stream that is merely quiet, and the page spends its life
+   * reconnecting.
+   */
+  private static final Duration HEARTBEAT = Duration.ofSeconds(20);
 
-    /**
-     * Each stream holds a thread for its lifetime, so this is a real limit rather than a
-     * formality. A dashboard has a handful of viewers; anything approaching this is a client that
-     * has stopped closing its connections.
-     */
-    private static final int MAX_SUBSCRIBERS = 24;
+  /**
+   * Each stream holds a thread for its lifetime, so this is a real limit rather than a
+   * formality. A dashboard has a handful of viewers; anything approaching this is a client that
+   * has stopped closing its connections.
+   */
+  private static final int MAX_SUBSCRIBERS = 24;
 
-    private final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
-    private final AtomicBoolean closed = new AtomicBoolean();
+  private final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
+  private final AtomicBoolean closed = new AtomicBoolean();
 
-    int subscriberCount() {
-        return subscribers.size();
+  int subscriberCount() {
+    return subscribers.size();
+  }
+
+  /**
+   * Publishes to everyone listening.
+   *
+   * @param event the event name, which is also the coalescing key: a newer value replaces an
+   *              older one that has not been written yet
+   */
+  void publish(String event, String data) {
+    for (Subscriber subscriber : subscribers) {
+      subscriber.offer(event, data);
+    }
+  }
+
+  /**
+   * Takes over the exchange and streams until the client goes away.
+   *
+   * <p>Blocks the calling thread for the life of the connection, which is why the server is
+   * given an expanding pool rather than a fixed one.
+   */
+  void serve(HttpExchange exchange, Map<String, String> initial) throws IOException {
+    Subscriber subscriber = new Subscriber();
+    // Admission and registration have to be one step. Checking the size and adding afterwards
+    // let concurrent requests past the cap together, and let one register into a feed that
+    // close() had already emptied — a stream nothing would ever stop.
+    synchronized (subscribers) {
+      if (closed.get() || subscribers.size() >= MAX_SUBSCRIBERS) {
+        exchange.sendResponseHeaders(503, -1);
+        return;
+      }
+      subscribers.add(subscriber);
     }
 
-    /**
-     * Publishes to everyone listening.
-     *
-     * @param event the event name, which is also the coalescing key: a newer value replaces an
-     *              older one that has not been written yet
-     */
-    void publish(String event, String data) {
-        for (Subscriber subscriber : subscribers) {
-            subscriber.offer(event, data);
-        }
+    exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
+    exchange.getResponseHeaders().set("Cache-Control", "no-store");
+    exchange.getResponseHeaders().set("Connection", "keep-alive");
+    // nginx buffers proxied responses by default, which holds every event until the buffer
+    // fills — for a stream of a few hundred bytes a minute, that is indistinguishable from a
+    // dead connection.
+    exchange.getResponseHeaders().set("X-Accel-Buffering", "no");
+    exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+    // Zero means chunked, which is what lets the body stay open.
+    exchange.sendResponseHeaders(200, 0);
+
+    try (OutputStream out = exchange.getResponseBody()) {
+      // Tells the browser how long to wait before reconnecting after a drop. The default is
+      // three seconds; two is a better fit for something being watched during a run.
+      write(out, "retry: 2000\n\n");
+      for (Map.Entry<String, String> entry : initial.entrySet()) {
+        writeEvent(out, entry.getKey(), entry.getValue());
+      }
+      subscriber.pump(out);
+    } catch (IOException e) {
+      // The ordinary way a stream ends: the tab was closed, or the network went away.
+      log.debug("Live stream ended: {}", e.toString());
+    } finally {
+      subscribers.remove(subscriber);
+    }
+  }
+
+  @Override
+  public void close() {
+    closed.set(true);
+    synchronized (subscribers) {
+      subscribers.forEach(Subscriber::stop);
+      subscribers.clear();
+    }
+  }
+
+  private static void writeEvent(OutputStream out, String event, String data) throws IOException {
+    StringBuilder frame = new StringBuilder(data.length() + 32);
+    frame.append("event: ").append(event).append('\n');
+    // The wire format is line-oriented, so a payload containing a newline has to be sent as
+    // several data lines; the browser rejoins them. A carriage return ends a line for the
+    // parser too, so splitting on newlines alone would leave one sitting inside a data line
+    // and cut the frame short.
+    for (String line : data.split("\r\n|\r|\n", -1)) {
+      frame.append("data: ").append(line).append('\n');
+    }
+    frame.append('\n');
+    write(out, frame.toString());
+  }
+
+  private static void write(OutputStream out, String text) throws IOException {
+    out.write(text.getBytes(StandardCharsets.UTF_8));
+    out.flush();
+  }
+
+  /**
+   * One connected browser.
+   *
+   * <p>Holds the latest value of each event rather than a queue of them. A page that was in a
+   * background tab, or on a slow link, then gets one current picture on its next write instead
+   * of replaying a minute of history it no longer cares about.
+   */
+  private static final class Subscriber {
+
+    private final Map<String, String> pending = new ConcurrentHashMap<>();
+    private final ReentrantLock lock = new ReentrantLock();
+    private final Condition arrived = lock.newCondition();
+    private volatile boolean running = true;
+
+    void offer(String event, String data) {
+      pending.put(event, data);
+      lock.lock();
+      try {
+        arrived.signalAll();
+      } finally {
+        lock.unlock();
+      }
     }
 
-    /**
-     * Takes over the exchange and streams until the client goes away.
-     *
-     * <p>Blocks the calling thread for the life of the connection, which is why the server is
-     * given an expanding pool rather than a fixed one.
-     */
-    void serve(HttpExchange exchange, Map<String, String> initial) throws IOException {
-        Subscriber subscriber = new Subscriber();
-        // Admission and registration have to be one step. Checking the size and adding afterwards
-        // let concurrent requests past the cap together, and let one register into a feed that
-        // close() had already emptied — a stream nothing would ever stop.
-        synchronized (subscribers) {
-            if (closed.get() || subscribers.size() >= MAX_SUBSCRIBERS) {
-                exchange.sendResponseHeaders(503, -1);
-                return;
+    void stop() {
+      running = false;
+      lock.lock();
+      try {
+        arrived.signalAll();
+      } finally {
+        lock.unlock();
+      }
+    }
+
+    void pump(OutputStream out) throws IOException {
+      while (running) {
+        if (pending.isEmpty()) {
+          lock.lock();
+          try {
+            if (pending.isEmpty() && running) {
+              arrived.await(HEARTBEAT.toMillis(), TimeUnit.MILLISECONDS);
             }
-            subscribers.add(subscriber);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+          } finally {
+            lock.unlock();
+          }
         }
-
-        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
-        exchange.getResponseHeaders().set("Cache-Control", "no-store");
-        exchange.getResponseHeaders().set("Connection", "keep-alive");
-        // nginx buffers proxied responses by default, which holds every event until the buffer
-        // fills — for a stream of a few hundred bytes a minute, that is indistinguishable from a
-        // dead connection.
-        exchange.getResponseHeaders().set("X-Accel-Buffering", "no");
-        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        // Zero means chunked, which is what lets the body stay open.
-        exchange.sendResponseHeaders(200, 0);
-
-        try (OutputStream out = exchange.getResponseBody()) {
-            // Tells the browser how long to wait before reconnecting after a drop. The default is
-            // three seconds; two is a better fit for something being watched during a run.
-            write(out, "retry: 2000\n\n");
-            for (Map.Entry<String, String> entry : initial.entrySet()) {
-                writeEvent(out, entry.getKey(), entry.getValue());
-            }
-            subscriber.pump(out);
-        } catch (IOException e) {
-            // The ordinary way a stream ends: the tab was closed, or the network went away.
-            log.debug("Live stream ended: {}", e.toString());
-        } finally {
-            subscribers.remove(subscriber);
+        if (!running) {
+          return;
         }
+        if (pending.isEmpty()) {
+          // Nothing happened; say so, which is also how a dead connection is discovered.
+          write(out, ": keepalive\n\n");
+          continue;
+        }
+        for (String event : List.copyOf(pending.keySet())) {
+          String data = pending.remove(event);
+          if (data != null) {
+            writeEvent(out, event, data);
+          }
+        }
+      }
     }
-
-    @Override
-    public void close() {
-        closed.set(true);
-        synchronized (subscribers) {
-            subscribers.forEach(Subscriber::stop);
-            subscribers.clear();
-        }
-    }
-
-    private static void writeEvent(OutputStream out, String event, String data) throws IOException {
-        StringBuilder frame = new StringBuilder(data.length() + 32);
-        frame.append("event: ").append(event).append('\n');
-        // The wire format is line-oriented, so a payload containing a newline has to be sent as
-        // several data lines; the browser rejoins them. A carriage return ends a line for the
-        // parser too, so splitting on newlines alone would leave one sitting inside a data line
-        // and cut the frame short.
-        for (String line : data.split("\r\n|\r|\n", -1)) {
-            frame.append("data: ").append(line).append('\n');
-        }
-        frame.append('\n');
-        write(out, frame.toString());
-    }
-
-    private static void write(OutputStream out, String text) throws IOException {
-        out.write(text.getBytes(StandardCharsets.UTF_8));
-        out.flush();
-    }
-
-    /**
-     * One connected browser.
-     *
-     * <p>Holds the latest value of each event rather than a queue of them. A page that was in a
-     * background tab, or on a slow link, then gets one current picture on its next write instead
-     * of replaying a minute of history it no longer cares about.
-     */
-    private static final class Subscriber {
-
-        private final Map<String, String> pending = new ConcurrentHashMap<>();
-        private final ReentrantLock lock = new ReentrantLock();
-        private final Condition arrived = lock.newCondition();
-        private volatile boolean running = true;
-
-        void offer(String event, String data) {
-            pending.put(event, data);
-            lock.lock();
-            try {
-                arrived.signalAll();
-            } finally {
-                lock.unlock();
-            }
-        }
-
-        void stop() {
-            running = false;
-            lock.lock();
-            try {
-                arrived.signalAll();
-            } finally {
-                lock.unlock();
-            }
-        }
-
-        void pump(OutputStream out) throws IOException {
-            while (running) {
-                if (pending.isEmpty()) {
-                    lock.lock();
-                    try {
-                        if (pending.isEmpty() && running) {
-                            arrived.await(HEARTBEAT.toMillis(), TimeUnit.MILLISECONDS);
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    } finally {
-                        lock.unlock();
-                    }
-                }
-                if (!running) {
-                    return;
-                }
-                if (pending.isEmpty()) {
-                    // Nothing happened; say so, which is also how a dead connection is discovered.
-                    write(out, ": keepalive\n\n");
-                    continue;
-                }
-                for (String event : List.copyOf(pending.keySet())) {
-                    String data = pending.remove(event);
-                    if (data != null) {
-                        writeEvent(out, event, data);
-                    }
-                }
-            }
-        }
-    }
+  }
 }

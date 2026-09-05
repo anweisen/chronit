@@ -11,28 +11,28 @@ import java.time.Duration;
  *                 requires the optional ViaVersion module
  */
 public record ServerConfig(
-        String id,
-        String host,
-        Integer port,
-        String protocol,
-        String brand,
-        ClientInfoConfig clientInformation,
-        ResourcePackConfig resourcePack,
-        Boolean acceptCodeOfConduct,
-        Boolean followTransfers,
-        ReadyWhenConfig readyWhen,
-        Duration connectTimeout,
-        SecureChatMode secureChat,
-        ProxyConfig proxy) {
+    String id,
+    String host,
+    Integer port,
+    String protocol,
+    String brand,
+    ClientInfoConfig clientInformation,
+    ResourcePackConfig resourcePack,
+    Boolean acceptCodeOfConduct,
+    Boolean followTransfers,
+    ReadyWhenConfig readyWhen,
+    Duration connectTimeout,
+    SecureChatMode secureChat,
+    ProxyConfig proxy) {
 
-    public static final int DEFAULT_PORT = 25565;
+  public static final int DEFAULT_PORT = 25565;
 
-    public int portOrDefault() {
-        return port != null ? port : DEFAULT_PORT;
-    }
+  public int portOrDefault() {
+    return port != null ? port : DEFAULT_PORT;
+  }
 
-    /** Display form used in logs and the web interface. */
-    public String address() {
-        return host + ":" + portOrDefault();
-    }
+  /** Display form used in logs and the web interface. */
+  public String address() {
+    return host + ":" + portOrDefault();
+  }
 }

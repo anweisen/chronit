@@ -29,58 +29,58 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class LogRedactionTest {
 
-    private LoggerContext context;
+  private LoggerContext context;
 
-    @AfterEach
-    void tearDown() {
-        Redactor.clear();
-        if (context != null) {
-            context.stop();
-        }
+  @AfterEach
+  void tearDown() {
+    Redactor.clear();
+    if (context != null) {
+      context.stop();
+    }
+  }
+
+  @Test
+  void thePackagedConfigurationMasksSecrets() throws Exception {
+    Redactor.register("s3cret-password");
+
+    String rendered = renderWithPackagedConfiguration(
+        "Sending /login s3cret-password to the server");
+
+    assertFalse(rendered.contains("s3cret-password"),
+        "the packaged logback.xml must mask registered secrets, but rendered: " + rendered);
+    assertTrue(rendered.contains("Sending /login ***"), rendered);
+  }
+
+  @Test
+  void theConversionRuleResolves() throws Exception {
+    // An unresolved conversion word is rendered literally rather than failing, which is
+    // exactly the kind of silent breakage this catches.
+    String rendered = renderWithPackagedConfiguration("nothing sensitive here");
+
+    assertFalse(rendered.contains("%redact"),
+        "the redact conversion rule did not resolve; logback rendered it literally: " + rendered);
+    assertTrue(rendered.contains("nothing sensitive here"), rendered);
+  }
+
+  private String renderWithPackagedConfiguration(String message) throws Exception {
+    context = new LoggerContext();
+    JoranConfigurator configurator = new JoranConfigurator();
+    configurator.setContext(context);
+
+    try (InputStream config = Objects.requireNonNull(
+        getClass().getResourceAsStream("/logback.xml"), "logback.xml is not on the classpath")) {
+      configurator.doConfigure(config);
     }
 
-    @Test
-    void thePackagedConfigurationMasksSecrets() throws Exception {
-        Redactor.register("s3cret-password");
+    ch.qos.logback.classic.Logger root = context.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
+    ConsoleAppender<ILoggingEvent> appender =
+        (ConsoleAppender<ILoggingEvent>) root.getAppender("CONSOLE");
+    PatternLayoutEncoder encoder = (PatternLayoutEncoder) appender.getEncoder();
 
-        String rendered = renderWithPackagedConfiguration(
-                "Sending /login s3cret-password to the server");
+    LoggingEvent event = new LoggingEvent(
+        LogRedactionTest.class.getName(), context.getLogger("net.anweisen.chronit.test"),
+        Level.INFO, message, null, null);
 
-        assertFalse(rendered.contains("s3cret-password"),
-                "the packaged logback.xml must mask registered secrets, but rendered: " + rendered);
-        assertTrue(rendered.contains("Sending /login ***"), rendered);
-    }
-
-    @Test
-    void theConversionRuleResolves() throws Exception {
-        // An unresolved conversion word is rendered literally rather than failing, which is
-        // exactly the kind of silent breakage this catches.
-        String rendered = renderWithPackagedConfiguration("nothing sensitive here");
-
-        assertFalse(rendered.contains("%redact"),
-                "the redact conversion rule did not resolve; logback rendered it literally: " + rendered);
-        assertTrue(rendered.contains("nothing sensitive here"), rendered);
-    }
-
-    private String renderWithPackagedConfiguration(String message) throws Exception {
-        context = new LoggerContext();
-        JoranConfigurator configurator = new JoranConfigurator();
-        configurator.setContext(context);
-
-        try (InputStream config = Objects.requireNonNull(
-                getClass().getResourceAsStream("/logback.xml"), "logback.xml is not on the classpath")) {
-            configurator.doConfigure(config);
-        }
-
-        ch.qos.logback.classic.Logger root = context.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
-        ConsoleAppender<ILoggingEvent> appender =
-                (ConsoleAppender<ILoggingEvent>) root.getAppender("CONSOLE");
-        PatternLayoutEncoder encoder = (PatternLayoutEncoder) appender.getEncoder();
-
-        LoggingEvent event = new LoggingEvent(
-                LogRedactionTest.class.getName(), context.getLogger("net.anweisen.chronit.test"),
-                Level.INFO, message, null, null);
-
-        return new String(encoder.encode(event), StandardCharsets.UTF_8);
-    }
+    return new String(encoder.encode(event), StandardCharsets.UTF_8);
+  }
 }

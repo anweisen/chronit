@@ -17,27 +17,27 @@ import java.util.List;
  *                 server-side before the same account reconnects elsewhere
  */
 public record VisitConfig(
-        String server,
-        String account,
-        Duration stayFor,
-        List<ActionConfig> onReady,
-        List<ActionConfig> onLeave,
-        RetryConfig onFail,
-        Duration gapAfter) {
+    String server,
+    String account,
+    Duration stayFor,
+    List<ActionConfig> onReady,
+    List<ActionConfig> onLeave,
+    RetryConfig onFail,
+    Duration gapAfter) {
 
-    public Duration stayForOrDefault() {
-        return stayFor != null ? stayFor : Duration.ZERO;
-    }
+  public Duration stayForOrDefault() {
+    return stayFor != null ? stayFor : Duration.ZERO;
+  }
 
-    public Duration gapAfterOrDefault() {
-        return gapAfter != null ? gapAfter : Duration.ofSeconds(5);
-    }
+  public Duration gapAfterOrDefault() {
+    return gapAfter != null ? gapAfter : Duration.ofSeconds(5);
+  }
 
-    public List<ActionConfig> onReadyOrEmpty() {
-        return onReady != null ? onReady : List.of();
-    }
+  public List<ActionConfig> onReadyOrEmpty() {
+    return onReady != null ? onReady : List.of();
+  }
 
-    public List<ActionConfig> onLeaveOrEmpty() {
-        return onLeave != null ? onLeave : List.of();
-    }
+  public List<ActionConfig> onLeaveOrEmpty() {
+    return onLeave != null ? onLeave : List.of();
+  }
 }

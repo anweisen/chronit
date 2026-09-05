@@ -19,16 +19,16 @@ import net.anweisen.chronit.core.driver.SlotClick;
  *                  container, so menu slots are numbered from 0 regardless of the menu's size
  */
 public record ClickConfig(
-        Integer slot,
-        SlotClick.InventoryPart inventory,
-        SlotClick.ClickButton button,
-        SlotClick.ClickMode mode) {
+    Integer slot,
+    SlotClick.InventoryPart inventory,
+    SlotClick.ClickButton button,
+    SlotClick.ClickMode mode) {
 
-    public SlotClick toSlotClick() {
-        return new SlotClick(
-                inventory != null ? inventory : SlotClick.InventoryPart.CONTAINER,
-                slot != null ? slot : 0,
-                button != null ? button : SlotClick.ClickButton.LEFT,
-                mode != null ? mode : SlotClick.ClickMode.PICKUP);
-    }
+  public SlotClick toSlotClick() {
+    return new SlotClick(
+        inventory != null ? inventory : SlotClick.InventoryPart.CONTAINER,
+        slot != null ? slot : 0,
+        button != null ? button : SlotClick.ClickButton.LEFT,
+        mode != null ? mode : SlotClick.ClickMode.PICKUP);
+  }
 }

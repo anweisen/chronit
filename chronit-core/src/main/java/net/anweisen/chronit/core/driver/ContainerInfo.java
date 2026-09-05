@@ -13,21 +13,21 @@ package net.anweisen.chronit.core.driver;
  *                         first and filled a moment later, and clicking in between does nothing
  */
 public record ContainerInfo(
-        int containerId,
-        String type,
-        String title,
-        int containerSlots,
-        boolean contentsReceived) {
+    int containerId,
+    String type,
+    String title,
+    int containerSlots,
+    boolean contentsReceived) {
 
-    /** Slots belonging to the player's own inventory within this window: 27 main plus 9 hotbar. */
-    public static final int PLAYER_INVENTORY_SLOTS = 36;
+  /** Slots belonging to the player's own inventory within this window: 27 main plus 9 hotbar. */
+  public static final int PLAYER_INVENTORY_SLOTS = 36;
 
-    public boolean knowsLayout() {
-        return containerSlots >= 0;
-    }
+  public boolean knowsLayout() {
+    return containerSlots >= 0;
+  }
 
-    public String describe() {
-        return "'" + title + "' (" + type + ", id " + containerId
-                + (knowsLayout() ? ", " + containerSlots + " slots" : ", contents pending") + ")";
-    }
+  public String describe() {
+    return "'" + title + "' (" + type + ", id " + containerId
+        + (knowsLayout() ? ", " + containerSlots + " slots" : ", contents pending") + ")";
+  }
 }
