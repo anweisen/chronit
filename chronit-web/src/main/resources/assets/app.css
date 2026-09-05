@@ -41,109 +41,153 @@
 
 /* Variable weight axis, so every weight on the page comes from one 46 kB file. */
 @font-face {
-  font-family: "Plex Sans";
-  src: url("plex-sans-var.woff2") format("woff2");
-  font-weight: 100 700;
-  font-style: normal;
-  font-display: swap;
+    font-family: "Plex Sans";
+    src: url("plex-sans-var.woff2") format("woff2");
+    font-weight: 100 700;
+    font-style: normal;
+    font-display: swap;
 }
 
 @font-face {
-  font-family: "Plex Mono";
-  src: url("plex-mono-400.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
+    font-family: "Plex Mono";
+    src: url("plex-mono-400.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
 }
 
 @font-face {
-  font-family: "Plex Mono";
-  src: url("plex-mono-500.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
+    font-family: "Plex Mono";
+    src: url("plex-mono-500.woff2") format("woff2");
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
 }
 
 /* ---------------------------------------------------------------- tokens */
 
 :root {
-  color-scheme: dark light;
+    color-scheme: dark light;
 
-  --font-text: "Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui,
+    --font-text: "Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui,
     sans-serif;
-  --font-mono: "Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Cascadia Mono",
+    --font-mono: "Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Cascadia Mono",
     Consolas, monospace;
 
-  /* One scale. Anything new belongs to one of these; there are no ad-hoc sizes below.
-   * Sans for language, mono for data — the split is the whole typographic system. */
-  --text-hero: 600 clamp(2.5rem, 6.5vw, 3.75rem) / 1.02 var(--font-text);
-  --text-display: 500 1.75rem/1.15 var(--font-text);
-  --text-title: 600 1.0625rem/1.35 var(--font-text);
-  --text-subtitle: 600 0.9375rem/1.4 var(--font-text);
-  --text-body: 400 0.9375rem/1.6 var(--font-text);
-  --text-small: 400 0.8125rem/1.55 var(--font-text);
-  /* The label. Mono, uppercase, tracked — every label on the page, without exception. */
-  --text-label: 500 0.6875rem/1.3 var(--font-mono);
-  /* A value. Sans, because "at 20:00", "1, then skip" and "Microsoft" are read as language, and
-   * mono slows that down for no gain. Plex Sans has tabular figures, so a number still holds its
-   * column while it ticks. */
-  --text-value: 400 0.875rem/1.5 var(--font-text);
-  --text-value-strong: 500 0.9375rem/1.45 var(--font-text);
-  /* A value that is a machine token — a path, a cron expression, an address, an identifier. Mono
-   * because the exact characters matter and the reader may need to copy them. */
-  --text-token: 400 0.8125rem/1.5 var(--font-mono);
-  /* A note: an annotation, or something the daemon is reporting back — a band's description, an
-   * account's detail, why a visit ended, an empty state. Mono, because the system is talking
-   * about itself and half of these sentences have a path or a command inside them ("Run: chronit
-   * login archive"). Same size as a label; case, tracking and colour carry the hierarchy. */
-  --text-note: 400 0.75rem/1.6 var(--font-mono);
+    /* One scale. Anything new belongs to one of these; there are no ad-hoc sizes below.
+     * Sans for language, mono for data — the split is the whole typographic system. */
+    --text-hero: 600 clamp(2.5rem, 6.5vw, 3.75rem) / 1.02 var(--font-text);
+    --text-display: 500 1.75rem/1.15 var(--font-text);
+    --text-title: 600 1.0625rem/1.35 var(--font-text);
+    --text-subtitle: 600 0.9375rem/1.4 var(--font-text);
+    --text-body: 400 0.9375rem/1.6 var(--font-text);
+    --text-small: 400 0.8125rem/1.55 var(--font-text);
+    /* The label. Mono, uppercase, tracked — every label on the page, without exception. */
+    --text-label: 500 0.6875rem/1.3 var(--font-mono);
+    /* A value. Sans, because "at 20:00", "1, then skip" and "Microsoft" are read as language, and
+     * mono slows that down for no gain. Plex Sans has tabular figures, so a number still holds its
+     * column while it ticks. */
+    --text-value: 400 0.875rem/1.5 var(--font-text);
+    --text-value-strong: 500 0.9375rem/1.45 var(--font-text);
+    /* A value that is a machine token — a path, a cron expression, an address, an identifier. Mono
+     * because the exact characters matter and the reader may need to copy them. */
+    --text-token: 400 0.8125rem/1.5 var(--font-mono);
+    /* A note: an annotation, or something the daemon is reporting back — a band's description, an
+     * account's detail, why a visit ended, an empty state. Mono, because the system is talking
+     * about itself and half of these sentences have a path or a command inside them ("Run: chronit
+     * login archive"). Same size as a label; case, tracking and colour carry the hierarchy. */
+    --text-note: 400 0.75rem/1.6 var(--font-mono);
 
-  --track-hero: -0.022em;
-  --track-title: -0.011em;
-  --track-label: 0.09em;
+    --track-hero: -0.022em;
+    --track-title: -0.011em;
+    --track-label: 0.09em;
 
-  /* Dark is the primary design; light is derived from it rather than the other way round.
-   * Every foreground here clears 4.5:1 against --bg, measured rather than eyeballed: the greys
-   * carry labels at eleven pixels, which is exactly where a merely tasteful grey stops being
-   * readable. --fg-faint is the floor at 6.3:1. */
-  --bg: #0a0b0d;
-  --bg-raise: #101216;
-  --bg-sunken: #07080a;
-  --line: #1f232a;
-  --line-soft: #171a1f;
-  --line-strong: #313640;
-  --fg: #e7e9ee;
-  --fg-muted: #aab1bd;
-  --fg-faint: #8b929e;
+    /* Dark is the primary design; light is derived from it rather than the other way round.
+     * Every foreground here clears 4.5:1 against --bg, measured rather than eyeballed: the greys
+     * carry labels at eleven pixels, which is exactly where a merely tasteful grey stops being
+     * readable. --fg-faint is the floor at 6.3:1. */
+    --bg: #0a0b0d;
+    --bg-raise: #101216;
+    --bg-sunken: #07080a;
+    --line: #1f232a;
+    --line-soft: #171a1f;
+    --line-strong: #313640;
+    --fg: #e7e9ee;
+    --fg-muted: #aab1bd;
+    --fg-faint: #8b929e;
 
-  --accent: #7d8cff;
-  --accent-wash: #171a2e;
-  --ok: #46cf99;
-  --warn: #e5ad4d;
-  --bad: #ff7b7b;
-  /* Stopped is deliberately cool rather than red: someone who pressed stop knows what they did. */
-  --stop: #93a3d6;
-  --skip: #7c8490;
+    --accent: #7d8cff;
+    --accent-wash: #171a2e;
+    --ok: #46cf99;
+    --warn: #e5ad4d;
+    --bad: #ff7b7b;
+    /* Stopped is deliberately cool rather than red: someone who pressed stop knows what they did. */
+    --stop: #93a3d6;
+    --skip: #7c8490;
 
-  --radius: 10px;
-  --radius-sm: 6px;
+    --radius: 10px;
+    --radius-sm: 6px;
 
-  --ease: cubic-bezier(0.32, 0.72, 0, 1);
-  --speed: 170ms;
-  /* Long enough to be followed, short enough never to be waited on. */
-  --reveal: 260ms;
+    --ease: cubic-bezier(0.32, 0.72, 0, 1);
+    --speed: 170ms;
+    /* Long enough to be followed, short enough never to be waited on. */
+    --reveal: 260ms;
 
-  --gutter: 1.25rem;
-  /* The label column of every .facts table. One value, so every table on the page aligns. */
-  --label-column: 9.5rem;
-  /* The distance from a heading to the block under it, and between blocks in the same stack.
-   * One value everywhere — a job, an account, a visit, a run's detail, an opened disclosure — so
-   * two rows of different kinds read as the same kind of thing. */
-  --stack: 1rem;
+    /* An unfold is the one piece of motion that moves the whole page beneath it, and the only one
+     * whose distance is not known in advance: a job's visit chain is a few lines, an expanded run
+     * is most of a screen. Two things follow from that.
+     *
+     * It gets its own easing. --ease is a hard ease-out, right for something small settling into
+     * place and wrong here, where the first frames would throw everything below the section down
+     * the page before slowing to a crawl. This one leaves and arrives gently and does most of its
+     * travel in the middle, so the content below reads as being pushed rather than kicked.
+     *
+     * And it gets a duration that scales: --unfold-min for no distance at all, rising to
+     * --unfold-max once the section is --unfold-span tall or more. One fixed duration makes a
+     * three-line section feel slow and a full-screen one feel thrown. */
+    --ease-unfold: cubic-bezier(0.4, 0.02, 0.18, 1);
+    --unfold-min: 190ms;
+    --unfold-max: 400ms;
+    --unfold-span: 900px;
+
+    --gutter: 1.25rem;
+    /* The label column of every .facts table. One value, so every table on the page aligns. */
+    --label-column: 9.5rem;
+    /* The distance from a heading to the block under it, and between blocks in the same stack.
+     * One value everywhere — a job, an account, a visit, a run's detail, an opened disclosure — so
+     * two rows of different kinds read as the same kind of thing. */
+    --stack: 1rem;
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
+    :root:not([data-theme="dark"]) {
+        --bg: #fbfbfa;
+        --bg-raise: #ffffff;
+        --bg-sunken: #f2f2f0;
+        --line: #e3e3df;
+        --line-soft: #ededea;
+        --line-strong: #c4c4be;
+        --fg: #14161a;
+        --fg-muted: #545a64;
+        --fg-faint: #696f78;
+        --accent: #3e4bcc;
+        --accent-wash: #eceefc;
+        --ok: #0f7f56;
+        --warn: #8a5c05;
+        --bad: #c2352f;
+        --stop: #48548c;
+        --skip: #6b717a;
+    }
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+    /* Narrowed from the pair above, so scrollbars and form controls follow the chosen theme rather
+     * than the operating system's. */
+    color-scheme: light;
     --bg: #fbfbfa;
     --bg-raise: #ffffff;
     --bg-sunken: #f2f2f0;
@@ -160,55 +204,54 @@
     --bad: #c2352f;
     --stop: #48548c;
     --skip: #6b717a;
-  }
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-}
-
-:root[data-theme="light"] {
-  /* Narrowed from the pair above, so scrollbars and form controls follow the chosen theme rather
-   * than the operating system's. */
-  color-scheme: light;
-  --bg: #fbfbfa;
-  --bg-raise: #ffffff;
-  --bg-sunken: #f2f2f0;
-  --line: #e3e3df;
-  --line-soft: #ededea;
-  --line-strong: #c4c4be;
-  --fg: #14161a;
-  --fg-muted: #545a64;
-  --fg-faint: #696f78;
-  --accent: #3e4bcc;
-  --accent-wash: #eceefc;
-  --ok: #0f7f56;
-  --warn: #8a5c05;
-  --bad: #c2352f;
-  --stop: #48548c;
-  --skip: #6b717a;
 }
 
 /* ---------------------------------------------------------------- tones */
 
-.is-ok { --tone: var(--ok); }
-.is-warn { --tone: var(--warn); }
-.is-bad { --tone: var(--bad); }
-.is-stop { --tone: var(--stop); }
-.is-skip { --tone: var(--skip); }
-.is-live { --tone: var(--accent); }
-.is-neutral { --tone: var(--fg-faint); }
+.is-ok {
+    --tone: var(--ok);
+}
+
+.is-warn {
+    --tone: var(--warn);
+}
+
+.is-bad {
+    --tone: var(--bad);
+}
+
+.is-stop {
+    --tone: var(--stop);
+}
+
+.is-skip {
+    --tone: var(--skip);
+}
+
+.is-live {
+    --tone: var(--accent);
+}
+
+.is-neutral {
+    --tone: var(--fg-faint);
+}
 
 /* ---------------------------------------------------------------- base */
 
 *,
 *::before,
 *::after {
-  box-sizing: border-box;
+    box-sizing: border-box;
 }
 
 html {
-  -webkit-text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+    /* The page grows and shrinks on its own: a run expanding, a job's live line opening, a push
+     * from the stream. Without a reserved gutter, whichever of those first pushes the document
+     * past the viewport takes the scrollbar's width out of the page, every line of text rewraps,
+     * and the section that was in the middle of opening finds it has been measured against a width
+     * that no longer exists. Reserving it costs a few pixels once. */
+    scrollbar-gutter: stable;
 }
 
 /* The browser's own `[hidden] { display: none }` is a user-agent rule, so any author rule that
@@ -216,28 +259,28 @@ html {
  * is toggled with the attribute any more (state-driven elements use a reveal or a swap, so they
  * can be transitioned), but this stays as the floor: `hidden` should always mean hidden. */
 [hidden] {
-  display: none !important;
+    display: none !important;
 }
 
 body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font: var(--text-body);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: var(--text-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 /* Prose. Plex Sans is a touch wide, so measure is capped where a paragraph could otherwise run
  * the full width of a band and become hard to track back from. */
 p {
-  margin: 0;
-  max-width: 62ch;
+    margin: 0;
+    max-width: 62ch;
 }
 
 h1, h2, h3 {
-  margin: 0;
-  letter-spacing: var(--track-title);
+    margin: 0;
+    letter-spacing: var(--track-title);
 }
 
 /* Anything that changes in place uses tabular figures, so nothing jitters as it ticks. */
@@ -248,41 +291,46 @@ code,
 .fact__value,
 .figure__value,
 .overview__value {
-  font-variant-numeric: tabular-nums;
+    font-variant-numeric: tabular-nums;
 }
 
 code,
 .mono {
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-  font-variant-ligatures: none;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    font-variant-ligatures: none;
 }
 
 a {
-  color: inherit;
-  text-decoration: none;
+    color: inherit;
+    text-decoration: none;
 }
 
 button,
 summary,
 [role="button"] {
-  cursor: pointer;
+    cursor: pointer;
 }
 
 :where(button, a, summary, input):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-  border-radius: var(--radius-sm);
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: var(--radius-sm);
 }
 
 svg {
-  width: 1em;
-  height: 1em;
-  flex: none;
+    width: 1em;
+    height: 1em;
+    flex: none;
 }
 
-.muted { color: var(--fg-muted); }
-.faint { color: var(--fg-faint); }
+.muted {
+    color: var(--fg-muted);
+}
+
+.faint {
+    color: var(--fg-faint);
+}
 
 /* ---------------------------------------------------------------- appearing */
 
@@ -295,12 +343,11 @@ svg {
  * animates to zero itself. Visibility rides along so a closed one is out of the tab order and out
  * of the accessibility tree, and because it is transitioned it waits for the fade before it goes. */
 .reveal {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    grid-template-rows var(--reveal) var(--ease),
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    visibility: hidden;
+    transition: grid-template-rows var(--reveal) var(--ease),
     margin-top var(--reveal) var(--ease),
     opacity calc(var(--reveal) * 0.75) var(--ease),
     visibility var(--reveal);
@@ -316,361 +363,433 @@ svg {
  * an account row and find one of them a rem taller for no reason. Spacing therefore goes on
  * something *inside* this box, never on the box itself. */
 .reveal > * {
-  overflow: hidden;
-  min-height: 0;
-  padding: 0;
+    overflow: hidden;
+    min-height: 0;
+    padding: 0;
 }
 
 .reveal.is-shown {
-  grid-template-rows: 1fr;
-  opacity: 1;
-  visibility: visible;
+    grid-template-rows: 1fr;
+    opacity: 1;
+    visibility: visible;
 }
 
 /* A swap is two controls sharing one slot: whichever applies is the one shown. They sit in the
  * same grid cell and cross-fade, so the row does not change width at the moment a job starts —
  * which is exactly when the pointer is over the button that is about to be replaced. */
 .swap {
-  display: grid;
-  align-items: center;
-  justify-items: end;
+    display: grid;
+    align-items: center;
+    justify-items: end;
 }
 
 .swap > * {
-  grid-area: 1 / 1;
-  transition:
-    opacity var(--speed) var(--ease),
+    grid-area: 1 / 1;
+    transition: opacity var(--speed) var(--ease),
     transform var(--speed) var(--ease),
     visibility var(--speed);
 }
 
 .swap > .is-away {
-  opacity: 0;
-  visibility: hidden;
-  transform: scale(0.97);
-  pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.97);
+    pointer-events: none;
 }
 
 /* Content the server re-rendered and the script swapped in. Not a slide — the block is already in
  * place and only its contents changed, so it lifts a hair and settles. */
 .is-entering {
-  animation: enter var(--reveal) var(--ease);
+    animation: enter var(--reveal) var(--ease);
 }
 
 @keyframes enter {
-  from {
-    opacity: 0.3;
-    transform: translateY(3px);
-  }
+    from {
+        opacity: 0.3;
+        transform: translateY(3px);
+    }
+}
+
+/* An expanding disclosure is the third device, and the only one the script has to measure: a
+ * <details> swaps its content between `display: none` and displayed, and no height of `auto` can
+ * be interpolated across that. app.js plays the height of a `.fold` — the bare box that wraps
+ * every disclosure's content — and these two rules are what that height needs.
+ *
+ * The fold exists only to be the thing that is clipped, and carries no padding, border or margin
+ * of its own; the padded body sits inside it. That is the whole point. Animating the padded body
+ * directly means animating its padding too, since `height: 0` on a border-box element still leaves
+ * its padding standing, and then the content travels as well: the first line drifts down as the
+ * section opens, and the last stretch of the animation reveals nothing but empty padding. It is
+ * the same rule the reveal follows, for the same reason. Spacing lives inside the clip, never on
+ * it.
+ *
+ * The clip is vertical only. A run's visits hang on the spine one step to the *left* of the body
+ * holding them (.timeline--nested pulls itself back by its parent's indent), so a clip on both
+ * axes would cut every node off the line. `overflow-x: visible` survives beside `overflow-y: clip`;
+ * beside anything else it would compute to `auto` and put a scrollbar under the content instead.
+ *
+ * It is held only while the height is moving, so a resting section cannot clip a focus ring. */
+.fold {
+    padding: 0;
+    border: 0;
+    margin: 0;
+}
+
+.is-unfolding > .fold {
+    overflow-x: visible;
+    overflow-y: clip;
+}
+
+/* Held for exactly one style computation while the script puts a section back the way the reader
+ * left it. Restoring is not a change of mind, and a chevron that turns on its own says one has
+ * been made. */
+.is-settling,
+.is-settling * {
+    transition: none !important;
 }
 
 /* ---------------------------------------------------------------- topbar */
 
 .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: saturate(150%) blur(14px);
-  border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(150%) blur(14px);
+    border-bottom: 1px solid var(--line);
 }
 
 .topbar__inner {
-  max-width: 74rem;
-  margin: 0 auto;
-  padding: 0.75rem var(--gutter);
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+    max-width: 74rem;
+    margin: 0 auto;
+    padding: 0.75rem var(--gutter);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
 }
 
 .brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 /* A small filled square, the same shape as a rail node. The wordmark is one of the family. */
 .brand__mark {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .brand__name {
-  font: 500 0.9375rem/1 var(--font-mono);
+    font: 500 0.9375rem/1 var(--font-mono);
 }
 
 .brand__meta {
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
-  padding-left: 0.75rem;
-  border-left: 1px solid var(--line);
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--line);
 }
 
 @media (max-width: 40rem) {
-  .brand__meta { display: none; }
+    .brand__meta {
+        display: none;
+    }
 }
 
-.topbar__spacer { flex: 1; }
+.topbar__spacer {
+    flex: 1;
+}
 
 /* The connection light. On a page that no longer polls, this is the only way a reader can tell
  * whether what they are looking at is current. */
 .link-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
 .link-state__beacon {
-  position: relative;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
+    position: relative;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
 }
 
 .link-state[data-state="live"] {
-  color: var(--ok);
+    color: var(--ok);
 }
 
 .link-state[data-state="live"] .link-state__beacon::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  border: 1px solid currentColor;
-  animation: beacon 2.4s var(--ease) infinite;
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+    animation: beacon 2.4s var(--ease) infinite;
 }
 
-.link-state[data-state="connecting"] { color: var(--fg-faint); }
-.link-state[data-state="reconnecting"] { color: var(--warn); }
-.link-state[data-state="offline"] { color: var(--bad); }
+.link-state[data-state="connecting"] {
+    color: var(--fg-faint);
+}
+
+.link-state[data-state="reconnecting"] {
+    color: var(--warn);
+}
+
+.link-state[data-state="offline"] {
+    color: var(--bad);
+}
 
 @keyframes beacon {
-  0% { transform: scale(0.7); opacity: 0.9; }
-  70% { transform: scale(2.1); opacity: 0; }
-  100% { transform: scale(2.1); opacity: 0; }
+    0% {
+        transform: scale(0.7);
+        opacity: 0.9;
+    }
+    70% {
+        transform: scale(2.1);
+        opacity: 0;
+    }
+    100% {
+        transform: scale(2.1);
+        opacity: 0;
+    }
 }
 
 .icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: 1rem;
-  transition: color var(--speed) var(--ease), background var(--speed) var(--ease);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-muted);
+    font-size: 1rem;
+    transition: color var(--speed) var(--ease), background var(--speed) var(--ease);
 }
 
 .icon-btn:hover {
-  color: var(--fg);
-  background: var(--bg-sunken);
+    color: var(--fg);
+    background: var(--bg-sunken);
 }
 
 /* ---------------------------------------------------------------- page */
 
 .page {
-  max-width: 74rem;
-  margin: 0 auto;
-  padding: 0 var(--gutter) 6rem;
+    max-width: 74rem;
+    margin: 0 auto;
+    padding: 0 var(--gutter) 6rem;
 }
 
 /* ---------------------------------------------------------------- overview */
 
 .overview {
-  padding: 3.5rem 0 3rem;
-  display: grid;
-  gap: 2.5rem;
+    padding: 3.5rem 0 3rem;
+    display: grid;
+    gap: 2.5rem;
 }
 
 /* The summary and the notice beneath it are two regions, pushed on two events, because one of
  * them holds a clock and the other one does not. */
 .overview__grid {
-  display: grid;
-  gap: 2.5rem;
+    display: grid;
+    gap: 2.5rem;
 }
 
 /* No notice, no row and no gap: an empty wrapper left behind would still take its share of the
  * stack above. */
 .overview__notice:empty {
-  display: none;
+    display: none;
 }
 
 @media (min-width: 52rem) {
-  .overview__grid {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: end;
-  }
+    .overview__grid {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+    }
 }
 
 .overview__eyebrow {
-  margin: 0 0 0.65rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    margin: 0 0 0.65rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
-.overview__eyebrow.is-live { color: var(--accent); }
+.overview__eyebrow.is-live {
+    color: var(--accent);
+}
 
 .overview__beacon {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: pulse 1.8s var(--ease) infinite;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: pulse 1.8s var(--ease) infinite;
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.25;
+    }
 }
 
 /* The one number on the page that is read from across the room, so it is the one thing set at
  * display weight. Everything else earns its emphasis from position instead. */
 .overview__value {
-  font: var(--text-hero);
-  letter-spacing: var(--track-hero);
+    font: var(--text-hero);
+    letter-spacing: var(--track-hero);
 }
 
 .overview__value--quiet {
-  font-size: clamp(1.75rem, 4vw, 2.5rem);
-  font-weight: 400;
-  color: var(--fg-muted);
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 400;
+    color: var(--fg-muted);
 }
 
 .overview__sub {
-  margin-top: 0.7rem;
-  color: var(--fg-muted);
-  font: var(--text-note);
+    margin-top: 0.7rem;
+    color: var(--fg-muted);
+    font: var(--text-note);
 }
 
 .overview__figures {
-  display: flex;
-  gap: 2.25rem;
+    display: flex;
+    gap: 2.25rem;
 }
 
 .figure__value {
-  font: var(--text-display);
-  letter-spacing: var(--track-title);
+    font: var(--text-display);
+    letter-spacing: var(--track-title);
 }
 
-.figure__value .is-warn { color: var(--warn); }
+.figure__value .is-warn {
+    color: var(--warn);
+}
 
 .figure__label {
-  margin-top: 0.45rem;
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    margin-top: 0.45rem;
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
 /* ---------------------------------------------------------------- alert */
 
 .alert {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.85rem;
-  padding: 0.9rem 0 0.9rem 1.25rem;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.9rem 0 0.9rem 1.25rem;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
 }
 
 .alert__icon {
-  display: inline-flex;
-  font-size: 1.15rem;
-  color: var(--warn);
+    display: inline-flex;
+    font-size: 1.15rem;
+    color: var(--warn);
 }
 
-.alert__body { flex: 1; min-width: 0; }
+.alert__body {
+    flex: 1;
+    min-width: 0;
+}
 
 .alert__title {
-  font: var(--text-subtitle);
+    font: var(--text-subtitle);
 }
 
 .alert__detail {
-  margin-top: 0.2rem;
-  color: var(--fg-muted);
-  font: var(--text-note);
+    margin-top: 0.2rem;
+    color: var(--fg-muted);
+    font: var(--text-note);
 }
 
 /* ---------------------------------------------------------------- bands */
 
 .band {
-  display: grid;
-  gap: 1.5rem;
-  padding: 3rem 0;
-  border-top: 1px solid var(--line);
+    display: grid;
+    gap: 1.5rem;
+    padding: 3rem 0;
+    border-top: 1px solid var(--line);
 }
 
 @media (min-width: 62rem) {
-  .band {
-    grid-template-columns: 13rem minmax(0, 1fr);
-    gap: 3rem;
-  }
-  .band__label {
-    position: sticky;
-    top: 4.5rem;
-    align-self: start;
-  }
+    .band {
+        grid-template-columns: 13rem minmax(0, 1fr);
+        gap: 3rem;
+    }
+
+    .band__label {
+        position: sticky;
+        top: 4.5rem;
+        align-self: start;
+    }
 }
 
 .band__title {
-  font: var(--text-label);
-  font-size: 0.75rem;
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg);
+    font: var(--text-label);
+    font-size: 0.75rem;
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg);
 }
 
 .band__note {
-  margin-top: 0.55rem;
-  color: var(--fg-faint);
-  font: var(--text-note);
-  max-width: 24rem;
+    margin-top: 0.55rem;
+    color: var(--fg-faint);
+    font: var(--text-note);
+    max-width: 24rem;
 }
 
-.band__body { min-width: 0; }
+.band__body {
+    min-width: 0;
+}
 
 /* ---------------------------------------------------------------- rail */
 
 .rail {
-  position: absolute;
-  left: 0;
-  top: 0.2rem;
-  bottom: 0.2rem;
-  width: 2px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--tone, var(--fg-faint)) 45%, transparent);
+    position: absolute;
+    left: 0;
+    top: 0.2rem;
+    bottom: 0.2rem;
+    width: 2px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--tone, var(--fg-faint)) 45%, transparent);
 }
 
 .rail__node {
-  position: absolute;
-  left: 50%;
-  top: 0.35rem;
-  width: 6px;
-  height: 6px;
-  margin-left: -3px;
-  border-radius: 50%;
-  background: var(--tone, var(--fg-faint));
+    position: absolute;
+    left: 50%;
+    top: 0.35rem;
+    width: 6px;
+    height: 6px;
+    margin-left: -3px;
+    border-radius: 50%;
+    background: var(--tone, var(--fg-faint));
 }
 
 /* A running job's rail carries light down it, which is the one piece of motion on the page that is
@@ -690,44 +809,52 @@ svg {
  * the same wavelength whatever the height of the row it belongs to. Linear timing, because any
  * easing would visibly slow down and speed up once per cycle. */
 .row.is-running .rail {
-  background-color: color-mix(in srgb, var(--accent) 28%, transparent);
-  background-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    var(--accent) 50%,
-    transparent 100%
-  );
-  background-repeat: repeat-y;
-  background-size: 100% 140px;
-  animation: rail-travel 2.8s linear infinite;
+    background-color: color-mix(in srgb, var(--accent) 28%, transparent);
+    background-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            var(--accent) 50%,
+            transparent 100%
+    );
+    background-repeat: repeat-y;
+    background-size: 100% 140px;
+    animation: rail-travel 2.8s linear infinite;
 }
 
 @keyframes rail-travel {
-  from { background-position: 0 0; }
-  to { background-position: 0 140px; }
+    from {
+        background-position: 0 0;
+    }
+    to {
+        background-position: 0 140px;
+    }
 }
 
 /* ---------------------------------------------------------------- rows */
 
 .rows {
-  display: flex;
-  flex-direction: column;
+    display: flex;
+    flex-direction: column;
 }
 
 .row {
-  position: relative;
-  padding: 1.5rem 0 1.5rem 1.35rem;
-  border-bottom: 1px solid var(--line-soft);
+    position: relative;
+    padding: 1.5rem 0 1.5rem 1.35rem;
+    border-bottom: 1px solid var(--line-soft);
 }
 
-.row:last-child { border-bottom: 0; }
+.row:last-child {
+    border-bottom: 0;
+}
 
-.row.is-disabled .row__name { color: var(--fg-muted); }
+.row.is-disabled .row__name {
+    color: var(--fg-muted);
+}
 
 .row__main {
-  display: grid;
-  gap: var(--stack);
-  min-width: 0;
+    display: grid;
+    gap: var(--stack);
+    min-width: 0;
 }
 
 /* The head and the live line are one block with no gap between them, because the gap is the
@@ -740,79 +867,85 @@ svg {
  * specificity and later in this file, so it silently won and the table sat flush against the line
  * above it. Spacing that a child can cancel by accident is spacing in the wrong place. */
 .row__lead {
-  display: grid;
-  min-width: 0;
+    display: grid;
+    min-width: 0;
 }
 
 /* Inside the clip, never on it — see the note on .reveal > *. */
 .row__lead .live-line {
-  padding-top: var(--stack);
+    padding-top: var(--stack);
 }
 
 .row__head {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
 }
 
 .row__identity {
-  display: flex;
-  align-items: baseline;
-  gap: 0.85rem;
-  flex-wrap: wrap;
-  flex: 1;
-  min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+    flex: 1;
+    min-width: 0;
 }
 
 .row__name {
-  font: var(--text-title);
+    font: var(--text-title);
 }
 
-.row__state { display: inline-flex; }
+.row__state {
+    display: inline-flex;
+}
 
 .row__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .row__note {
-  color: var(--fg-muted);
-  font: var(--text-note);
+    color: var(--fg-muted);
+    font: var(--text-note);
 }
 
-.row__note:empty { display: none; }
+.row__note:empty {
+    display: none;
+}
 
 /* ---------------------------------------------------------------- state */
 
 .state {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--tone, var(--fg-muted));
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--tone, var(--fg-muted));
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    white-space: nowrap;
 }
 
 .state__mark {
-  width: 12px;
-  height: 12px;
+    width: 12px;
+    height: 12px;
 }
 
 .state__spinner {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-top-color: currentColor;
-  animation: spin 900ms linear infinite;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 1.5px solid color-mix(in srgb, currentColor 25%, transparent);
+    border-top-color: currentColor;
+    animation: spin 900ms linear infinite;
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* ---------------------------------------------------------------- facts */
@@ -822,53 +955,53 @@ svg {
  * than back under the label. Below the breakpoint the label sits above its value, because a
  * 9.5rem column on a phone leaves nothing for the value. */
 .facts {
-  margin: 0;
-  display: grid;
-  gap: 0.55rem;
+    margin: 0;
+    display: grid;
+    gap: 0.55rem;
 }
 
 .fact {
-  display: grid;
-  gap: 0.1rem 1rem;
-  align-items: baseline;
+    display: grid;
+    gap: 0.1rem 1rem;
+    align-items: baseline;
 }
 
 @media (min-width: 30rem) {
-  .fact {
-    grid-template-columns: var(--label-column) minmax(0, 1fr);
-    gap: 0.35rem 1rem;
-  }
+    .fact {
+        grid-template-columns: var(--label-column) minmax(0, 1fr);
+        gap: 0.35rem 1rem;
+    }
 }
 
 .fact__label {
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
 .fact__value {
-  margin: 0;
-  font: var(--text-value);
-  color: var(--fg);
-  min-width: 0;
-  overflow-wrap: anywhere;
+    margin: 0;
+    font: var(--text-value);
+    color: var(--fg);
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .fact__value--strong {
-  font: var(--text-value-strong);
-  color: var(--fg);
+    font: var(--text-value-strong);
+    color: var(--fg);
 }
 
 /* Paths, expressions and addresses: the exact characters matter, so they switch to mono. */
 .fact__value--mono {
-  font: var(--text-token);
-  color: var(--fg-muted);
+    font: var(--text-token);
+    color: var(--fg-muted);
 }
 
 /* An unset option or an absent measurement: present because its absence is the answer. */
 .fact__value--quiet {
-  color: var(--fg-faint);
+    color: var(--fg-faint);
 }
 
 /* ---------------------------------------------------------------- meta */
@@ -876,321 +1009,342 @@ svg {
 /* The same pairs on one line, for a collapsed summary. Identical type to .fact, so a run reads
  * the same way whether it is folded or open. */
 .meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 1rem;
-  align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1rem;
+    align-items: baseline;
 }
 
 .meta__item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.45rem;
-  padding-right: 1rem;
-  border-right: 1px solid var(--line);
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    padding-right: 1rem;
+    border-right: 1px solid var(--line);
 }
 
 .meta__item:last-child {
-  padding-right: 0;
-  border-right: 0;
+    padding-right: 0;
+    border-right: 0;
 }
 
 .meta__label {
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
 .meta__value {
-  font: var(--text-value);
-  font-size: 0.8125rem;
-  color: var(--fg);
+    font: var(--text-value);
+    font-size: 0.8125rem;
+    color: var(--fg);
 }
 
 /* ---------------------------------------------------------------- progress */
 
 .progress {
-  height: 2px;
-  border-radius: 2px;
-  background: var(--line);
-  overflow: hidden;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--line);
+    overflow: hidden;
 }
 
 .progress__fill {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width 400ms var(--ease);
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 400ms var(--ease);
 }
 
 .live-line {
-  display: grid;
-  gap: 0.5rem;
+    display: grid;
+    gap: 0.5rem;
 }
 
 .live-line__facts {
-  display: flex;
-  gap: 0.75rem;
-  align-items: baseline;
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
-.live-line__where { color: var(--accent); }
+.live-line__where {
+    color: var(--accent);
+}
 
 /* ---------------------------------------------------------------- disclosure */
 
-.disclosure { min-width: 0; }
-
-.disclosure__summary {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 0;
-  list-style: none;
-  color: var(--fg-muted);
-  transition: color var(--speed) var(--ease);
+.disclosure {
+    min-width: 0;
 }
 
-.disclosure__summary::-webkit-details-marker { display: none; }
-.disclosure__summary:hover { color: var(--fg); }
+.disclosure__summary {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0;
+    list-style: none;
+    color: var(--fg-muted);
+    transition: color var(--speed) var(--ease);
+}
+
+.disclosure__summary::-webkit-details-marker {
+    display: none;
+}
+
+.disclosure__summary:hover {
+    color: var(--fg);
+}
 
 .disclosure__chevron {
-  display: inline-flex;
-  font-size: 0.9rem;
-  color: var(--fg-faint);
-  transition: transform var(--speed) var(--ease);
+    display: inline-flex;
+    font-size: 0.9rem;
+    color: var(--fg-faint);
+    transition: transform var(--speed) var(--ease);
 }
 
 .disclosure[open] > .disclosure__summary .disclosure__chevron,
 details[open] > .tl__summary .disclosure__chevron {
-  transform: rotate(90deg);
+    transform: rotate(90deg);
 }
 
 .disclosure__label {
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
 }
 
 .disclosure__trail {
-  font: var(--text-token);
-  color: var(--fg-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+    font: var(--text-token);
+    color: var(--fg-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
 }
 
-.disclosure__body { padding: var(--stack) 0 0.25rem; }
+.disclosure__body {
+    padding: var(--stack) 0 0.25rem;
+}
 
 /* ---------------------------------------------------------------- visits */
 
 .visits {
-  list-style: none;
-  margin: 0;
-  padding: 0.5rem 0 0;
-  display: grid;
-  gap: 1.75rem;
+    list-style: none;
+    margin: 0;
+    padding: 0.5rem 0 0;
+    display: grid;
+    gap: 1.75rem;
 }
 
 .visit {
-  display: grid;
-  grid-template-columns: 1.5rem minmax(0, 1fr);
-  gap: 0.75rem;
+    display: grid;
+    grid-template-columns: 1.5rem minmax(0, 1fr);
+    gap: 0.75rem;
 }
 
 .visit__index {
-  font: var(--text-token);
-  color: var(--fg-faint);
-  padding-top: 0.1rem;
+    font: var(--text-token);
+    color: var(--fg-faint);
+    padding-top: 0.1rem;
 }
 
 .visit__body {
-  display: grid;
-  gap: var(--stack);
-  min-width: 0;
+    display: grid;
+    gap: var(--stack);
+    min-width: 0;
 }
 
 .visit__server {
-  font: var(--text-subtitle);
+    font: var(--text-subtitle);
 }
 
 /* ---------------------------------------------------------------- steps */
 
 .sequence {
-  display: grid;
-  gap: 0.45rem;
+    display: grid;
+    gap: 0.45rem;
 }
 
 .sequence__label {
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
 .steps {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 0.85rem;
-  display: grid;
-  gap: 0.4rem;
-  border-left: 1px solid var(--line);
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 0.85rem;
+    display: grid;
+    gap: 0.4rem;
+    border-left: 1px solid var(--line);
 }
 
 /* A step is a label and a value like everything else, so it uses the same column. */
 .step {
-  display: grid;
-  gap: 0.1rem 1rem;
-  font: var(--text-token);
+    display: grid;
+    gap: 0.1rem 1rem;
+    font: var(--text-token);
 }
 
 @media (min-width: 30rem) {
-  .step {
-    grid-template-columns: 3.5rem minmax(0, 1fr);
-    align-items: baseline;
-  }
+    .step {
+        grid-template-columns: 3.5rem minmax(0, 1fr);
+        align-items: baseline;
+    }
 }
 
 .step__kind {
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
-.step__body { overflow-wrap: anywhere; }
+.step__body {
+    overflow-wrap: anywhere;
+}
 
 .step__note {
-  color: var(--fg-faint);
-  font: var(--text-note);
+    color: var(--fg-faint);
+    font: var(--text-note);
 }
 
 /* Aligned under the payload rather than under the kind, once there are two columns to align to.
  * Placed here rather than beside the note itself, because below the breakpoint the step is a
  * single column and a second-column placement would create a phantom one. */
 @media (min-width: 30rem) {
-  .step__note { grid-column: 2; }
+    .step__note {
+        grid-column: 2;
+    }
 }
 
 /* ---------------------------------------------------------------- timeline */
 
 .timeline {
-  --node: 7px;
-  /* Centre of the spine, and therefore of every node hung on it. */
-  --spine: 3.5px;
-  /* Half the line box of a headline (0.9375rem at 1.4), so a node sits on the middle of the text
-   * beside it rather than on the middle of nothing. */
-  --headline: 0.7em;
-  /* Whatever separates the top of a row from that headline. */
-  --lead-pad: 0.9rem;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  position: relative;
+    --node: 7px;
+    /* Centre of the spine, and therefore of every node hung on it. */
+    --spine: 3.5px;
+    /* Half the line box of a headline (0.9375rem at 1.4), so a node sits on the middle of the text
+     * beside it rather than on the middle of nothing. */
+    --headline: 0.7em;
+    /* Whatever separates the top of a row from that headline. */
+    --lead-pad: 0.9rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    position: relative;
 }
 
 /* The spine. One line down the whole history — runs and, once a run is open, its visits too.
  * Inset at both ends so it starts and stops at the first and last node rather than running off
  * into the hairline above. */
 .timeline::before {
-  content: "";
-  position: absolute;
-  left: calc(var(--spine) - 0.5px);
-  top: 1.1rem;
-  bottom: 1.1rem;
-  width: 1px;
-  background: var(--line);
+    content: "";
+    position: absolute;
+    left: calc(var(--spine) - 0.5px);
+    top: 1.1rem;
+    bottom: 1.1rem;
+    width: 1px;
+    background: var(--line);
 }
 
 .tl {
-  position: relative;
-  padding-left: 1.6rem;
+    position: relative;
+    padding-left: 1.6rem;
 }
 
 /* The separator sits on the body rather than the row, so it starts to the right of the spine
  * instead of cutting across it. */
-.tl--run > .tl__body { border-bottom: 1px solid var(--line-soft); }
-.tl--run:last-child > .tl__body { border-bottom: 0; }
+.tl--run > .tl__body {
+    border-bottom: 1px solid var(--line-soft);
+}
+
+.tl--run:last-child > .tl__body {
+    border-bottom: 0;
+}
 
 .tl__node {
-  position: absolute;
-  left: calc(var(--spine) - var(--node) / 2);
-  /* Centred on its headline, not on the row: the row includes a table and a reason underneath, so
-   * centring on that would float the node somewhere in the middle of the text. */
-  top: calc(var(--lead-pad) + var(--headline) - var(--node) / 2);
-  width: var(--node);
-  height: var(--node);
-  border-radius: 50%;
-  background: var(--bg);
-  border: 1.5px solid var(--tone, var(--fg-faint));
-  /* Punches a hole in the spine so the line appears to pass behind the node, not through it. */
-  box-shadow: 0 0 0 3px var(--bg);
+    position: absolute;
+    left: calc(var(--spine) - var(--node) / 2);
+    /* Centred on its headline, not on the row: the row includes a table and a reason underneath, so
+     * centring on that would float the node somewhere in the middle of the text. */
+    top: calc(var(--lead-pad) + var(--headline) - var(--node) / 2);
+    width: var(--node);
+    height: var(--node);
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1.5px solid var(--tone, var(--fg-faint));
+    /* Punches a hole in the spine so the line appears to pass behind the node, not through it. */
+    box-shadow: 0 0 0 3px var(--bg);
 }
 
 .tl.is-ok .tl__node,
 .tl.is-live .tl__node {
-  background: var(--tone);
+    background: var(--tone);
 }
 
 /* A node that was never reached is drawn faintly rather than with a dotted ring, which at five
  * pixels across renders as a broken circle rather than a deliberate one. The dash in its state
  * mark is what says "not reached"; the node only has to be present and quiet. */
 .tl.is-skip .tl__node {
-  border-color: color-mix(in srgb, var(--tone) 55%, transparent);
+    border-color: color-mix(in srgb, var(--tone) 55%, transparent);
 }
 
 /* Stacked, never side by side: the identity line, then the summary pairs. Two blocks competing
  * for the left edge of the same row gave the eye two places to start and left ragged space
  * between them at most widths. */
 .tl__summary {
-  position: relative;
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.9rem 1.75rem 0.9rem 0;
-  list-style: none;
+    position: relative;
+    display: grid;
+    gap: 0.45rem;
+    padding: 0.9rem 1.75rem 0.9rem 0;
+    list-style: none;
 }
 
-.tl__summary::-webkit-details-marker { display: none; }
+.tl__summary::-webkit-details-marker {
+    display: none;
+}
 
 .tl__summary .disclosure__chevron {
-  position: absolute;
-  right: 0;
-  top: 1rem;
+    position: absolute;
+    right: 0;
+    top: 1rem;
 }
 
 .tl__head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.85rem;
-  flex-wrap: wrap;
-  min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+    min-width: 0;
 }
 
 .tl__title {
-  font: var(--text-subtitle);
+    font: var(--text-subtitle);
 }
 
 .tl__when {
-  font: var(--text-value);
-  font-size: 0.8125rem;
-  color: var(--fg-faint);
-  margin-left: auto;
+    font: var(--text-value);
+    font-size: 0.8125rem;
+    color: var(--fg-faint);
+    margin-left: auto;
 }
 
 .tl__detail {
-  padding: 0.25rem 0 1.25rem;
+    padding: 0.25rem 0 1.25rem;
 }
 
 /* Opening a run reveals its visits; they arrive rather than appear, like every other block the
- * state puts on screen. */
-details[open] > .tl__detail {
-  animation: enter var(--reveal) var(--ease);
-}
+ * state puts on screen. The height is played from the script — see .is-unfolding — because it was
+ * an `animation: enter` here, and a rule keyed on [open] fires for every run the page restores as
+ * open and for every one the live stream re-renders, which is exactly when nothing has changed. */
 
 /* The visits hang on the *same* spine as the runs. The nested list is pulled back by exactly the
  * indent its parent applied, which lands its nodes on the one line already running down the page;
@@ -1200,279 +1354,285 @@ details[open] > .tl__detail {
  * Their content is then indented a step further than a run's, so the hierarchy is carried by where
  * the text starts rather than by a duplicate spine. */
 .timeline--nested {
-  margin-left: -1.6rem;
+    margin-left: -1.6rem;
 }
 
 .timeline--nested::before {
-  content: none;
+    content: none;
 }
 
 .tl--visit {
-  /* A smaller node: same shape and same line, visibly subordinate. */
-  --node: 5px;
-  /* The li's own padding is what precedes this headline, so the node follows it. */
-  --lead-pad: 0.6rem;
-  padding-left: 2.4rem;
-  padding-top: 0.6rem;
-  padding-bottom: 0.9rem;
+    /* A smaller node: same shape and same line, visibly subordinate. */
+    --node: 5px;
+    /* The li's own padding is what precedes this headline, so the node follows it. */
+    --lead-pad: 0.6rem;
+    padding-left: 2.4rem;
+    padding-top: 0.6rem;
+    padding-bottom: 0.9rem;
 }
 
 .tl--visit .tl__body {
-  display: grid;
-  gap: var(--stack);
+    display: grid;
+    gap: var(--stack);
 }
 
 .tl__reason {
-  padding-left: 0.75rem;
-  border-left: 2px solid color-mix(in srgb, var(--tone, var(--fg-faint)) 40%, transparent);
-  color: var(--fg-muted);
-  font: var(--text-note);
-  overflow-wrap: anywhere;
+    padding-left: 0.75rem;
+    border-left: 2px solid color-mix(in srgb, var(--tone, var(--fg-faint)) 40%, transparent);
+    color: var(--fg-muted);
+    font: var(--text-note);
+    overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------- buttons */
 
 .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  padding: 0.42rem 0.8rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg);
-  font: 500 0.8125rem/1.2 var(--font-text);
-  transition: border-color var(--speed) var(--ease), background var(--speed) var(--ease),
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.42rem 0.8rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg);
+    font: 500 0.8125rem/1.2 var(--font-text);
+    transition: border-color var(--speed) var(--ease), background var(--speed) var(--ease),
     color var(--speed) var(--ease);
 }
 
-.btn svg { font-size: 0.95rem; }
+.btn svg {
+    font-size: 0.95rem;
+}
 
 .btn:hover:not(:disabled) {
-  border-color: var(--fg-muted);
-  background: var(--bg-sunken);
+    border-color: var(--fg-muted);
+    background: var(--bg-sunken);
 }
 
 .btn:disabled {
-  opacity: 0.5;
-  cursor: default;
+    opacity: 0.5;
+    cursor: default;
 }
 
 .btn--primary {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    color: var(--accent);
 }
 
 .btn--primary:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--accent-wash);
+    border-color: var(--accent);
+    background: var(--accent-wash);
 }
 
 .btn--stop {
-  border-color: color-mix(in srgb, var(--stop) 55%, transparent);
-  color: var(--stop);
+    border-color: color-mix(in srgb, var(--stop) 55%, transparent);
+    color: var(--stop);
 }
 
 .btn--stop:hover:not(:disabled) {
-  border-color: var(--stop);
-  background: color-mix(in srgb, var(--stop) 12%, transparent);
+    border-color: var(--stop);
+    background: color-mix(in srgb, var(--stop) 12%, transparent);
 }
 
 .btn--lg {
-  padding: 0.6rem 1.1rem;
-  font-size: 0.875rem;
+    padding: 0.6rem 1.1rem;
+    font-size: 0.875rem;
 }
 
 /* A text action with an arrow. Used wherever a button would be one rectangle too many. */
 .link-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--accent);
-  font: 500 0.8125rem/1.2 var(--font-text);
-  white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--accent);
+    font: 500 0.8125rem/1.2 var(--font-text);
+    white-space: nowrap;
 }
 
 .link-action svg {
-  font-size: 0.9rem;
-  transition: transform var(--speed) var(--ease);
+    font-size: 0.9rem;
+    transition: transform var(--speed) var(--ease);
 }
 
-.link-action:hover svg { transform: translateX(2px); }
+.link-action:hover svg {
+    transform: translateX(2px);
+}
 
 /* ---------------------------------------------------------------- empty */
 
 .empty {
-  padding: 1.75rem 0;
-  color: var(--fg-faint);
-  font: var(--text-note);
-  border-top: 1px dashed var(--line);
-  border-bottom: 1px dashed var(--line);
+    padding: 1.75rem 0;
+    color: var(--fg-faint);
+    font: var(--text-note);
+    border-top: 1px dashed var(--line);
+    border-bottom: 1px dashed var(--line);
 }
 
 /* ---------------------------------------------------------------- solo pages */
 
 .solo {
-  max-width: 30rem;
-  margin: 0 auto;
-  padding: 4.5rem var(--gutter) 4rem;
+    max-width: 30rem;
+    margin: 0 auto;
+    padding: 4.5rem var(--gutter) 4rem;
 }
 
 .solo__sheet {
-  position: relative;
-  padding-left: 1.5rem;
-  display: grid;
-  gap: 1.5rem;
+    position: relative;
+    padding-left: 1.5rem;
+    display: grid;
+    gap: 1.5rem;
 }
 
 .solo__eyebrow {
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
 .solo__title {
-  margin-top: 0.5rem;
-  font: 500 2.25rem/1.1 var(--font-text);
-  letter-spacing: var(--track-hero);
+    margin-top: 0.5rem;
+    font: 500 2.25rem/1.1 var(--font-text);
+    letter-spacing: var(--track-hero);
 }
 
 .solo__body {
-  display: grid;
-  gap: 1.25rem;
-  justify-items: start;
+    display: grid;
+    gap: 1.25rem;
+    justify-items: start;
 }
 
 .solo__lead {
-  font: var(--text-body);
-  color: var(--fg-muted);
+    font: var(--text-body);
+    color: var(--fg-muted);
 }
 
-.solo__lead.is-bad { color: var(--bad); }
+.solo__lead.is-bad {
+    color: var(--bad);
+}
 
 .solo__note {
-  color: var(--fg-faint);
-  font: var(--text-note);
+    color: var(--fg-faint);
+    font: var(--text-note);
 }
 
 .solo__actions {
-  display: flex;
-  gap: 0.6rem;
-  flex-wrap: wrap;
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
 }
 
 .solo__back {
-  margin-top: 2.5rem;
-  padding-left: 1.5rem;
+    margin-top: 2.5rem;
+    padding-left: 1.5rem;
 }
 
 .field {
-  display: grid;
-  gap: 0.4rem;
-  width: 100%;
+    display: grid;
+    gap: 0.4rem;
+    width: 100%;
 }
 
 .field label {
-  font: var(--text-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--fg-faint);
+    font: var(--text-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--fg-faint);
 }
 
 .field input {
-  width: 100%;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raise);
-  color: var(--fg);
-  font: var(--text-token);
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-raise);
+    color: var(--fg);
+    font: var(--text-token);
 }
 
 .field input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-color: transparent;
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: transparent;
 }
 
 /* The device code. Large, spaced and selectable — it is going to be typed on another device. */
 .code {
-  font: 400 clamp(2rem, 9vw, 2.75rem) / 1 var(--font-mono);
-  letter-spacing: 0.14em;
-  user-select: all;
-  padding: 0.25rem 0;
+    font: 400 clamp(2rem, 9vw, 2.75rem) / 1 var(--font-mono);
+    letter-spacing: 0.14em;
+    user-select: all;
+    padding: 0.25rem 0;
 }
 
 .spinner {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2px solid var(--line-strong);
-  border-top-color: var(--accent);
-  animation: spin 900ms linear infinite;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid var(--line-strong);
+    border-top-color: var(--accent);
+    animation: spin 900ms linear infinite;
 }
 
 /* ---------------------------------------------------------------- dialog */
 
 .sheet {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-raise);
-  color: var(--fg);
-  padding: 0;
-  max-width: 26rem;
-  width: calc(100% - 2rem);
-  box-shadow: 0 20px 60px -20px rgb(0 0 0 / 55%);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-raise);
+    color: var(--fg);
+    padding: 0;
+    max-width: 26rem;
+    width: calc(100% - 2rem);
+    box-shadow: 0 20px 60px -20px rgb(0 0 0 / 55%);
 }
 
 .sheet::backdrop {
-  background: rgb(0 0 0 / 45%);
-  backdrop-filter: blur(2px);
+    background: rgb(0 0 0 / 45%);
+    backdrop-filter: blur(2px);
 }
 
 .sheet__body {
-  position: relative;
-  padding: 1.5rem 1.5rem 1.25rem 2.5rem;
+    position: relative;
+    padding: 1.5rem 1.5rem 1.25rem 2.5rem;
 }
 
 .sheet__body .rail {
-  left: 1.5rem;
-  top: 1.6rem;
-  bottom: 1.5rem;
+    left: 1.5rem;
+    top: 1.6rem;
+    bottom: 1.5rem;
 }
 
 .sheet__title {
-  font: var(--text-title);
-  font-size: 1.125rem;
+    font: var(--text-title);
+    font-size: 1.125rem;
 }
 
 .sheet__detail {
-  margin-top: 0.6rem;
-  color: var(--fg-muted);
-  font: var(--text-small);
+    margin-top: 0.6rem;
+    color: var(--fg-muted);
+    font: var(--text-small);
 }
 
 .sheet__subject {
-  margin-top: 0.9rem;
-  font: var(--text-token);
-  color: var(--fg);
+    margin-top: 0.9rem;
+    font: var(--text-token);
+    color: var(--fg);
 }
 
 .sheet__subject::before {
-  content: "job ";
-  color: var(--fg-faint);
+    content: "job ";
+    color: var(--fg-faint);
 }
 
 .sheet__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.6rem;
-  padding: 1rem 1.5rem;
-  border-top: 1px solid var(--line);
-  background: var(--bg-sunken);
-  border-radius: 0 0 var(--radius) var(--radius);
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.6rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--line);
+    background: var(--bg-sunken);
+    border-radius: 0 0 var(--radius) var(--radius);
 }
 
 /* ---------------------------------------------------------------- toasts */
@@ -1481,72 +1641,87 @@ details[open] > .tl__detail {
  * was being read; in the corner they are findable without being in the way, and they arrive from
  * the edge they are anchored to rather than from nowhere. */
 .toasts {
-  position: fixed;
-  bottom: var(--gutter);
-  left: var(--gutter);
-  z-index: 40;
-  display: grid;
-  gap: 0.5rem;
-  justify-items: start;
-  pointer-events: none;
-  /* Wide enough for a sentence, narrow enough that two lines is the worst case. */
-  width: min(24rem, calc(100vw - var(--gutter) * 2));
+    position: fixed;
+    bottom: var(--gutter);
+    left: var(--gutter);
+    z-index: 40;
+    display: grid;
+    gap: 0.5rem;
+    justify-items: start;
+    pointer-events: none;
+    /* Wide enough for a sentence, narrow enough that two lines is the worst case. */
+    width: min(24rem, calc(100vw - var(--gutter) * 2));
 }
 
 .toast {
-  position: relative;
-  /* Asymmetric: the extra room on the left is the rail's, so the text sits on an even margin
-   * inside it rather than being pushed off-centre by it. */
-  padding: 0.75rem 1rem 0.75rem 1.25rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-raise);
-  color: var(--fg);
-  /* A toast is the daemon answering, so it takes the same voice as every other thing the daemon
-   * says on this page — and half of these messages have a job id in them. */
-  font: var(--text-note);
-  box-shadow: 0 16px 40px -18px rgb(0 0 0 / 60%), 0 2px 6px -2px rgb(0 0 0 / 25%);
-  animation: toast-in var(--reveal) var(--ease);
-  max-width: 100%;
-  overflow-wrap: anywhere;
+    position: relative;
+    /* Asymmetric: the extra room on the left is the rail's, so the text sits on an even margin
+     * inside it rather than being pushed off-centre by it. */
+    padding: 0.75rem 1rem 0.75rem 1.25rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-raise);
+    color: var(--fg);
+    /* A toast is the daemon answering, so it takes the same voice as every other thing the daemon
+     * says on this page — and half of these messages have a job id in them. */
+    font: var(--text-note);
+    box-shadow: 0 16px 40px -18px rgb(0 0 0 / 60%), 0 2px 6px -2px rgb(0 0 0 / 25%);
+    animation: toast-in var(--reveal) var(--ease);
+    max-width: 100%;
+    overflow-wrap: anywhere;
 }
 
 /* The same rail that begins every row, at the same width and inset. */
 .toast::before {
-  content: "";
-  position: absolute;
-  left: 0.5rem;
-  top: 0.75rem;
-  bottom: 0.75rem;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--fg-faint);
+    content: "";
+    position: absolute;
+    left: 0.5rem;
+    top: 0.75rem;
+    bottom: 0.75rem;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--fg-faint);
 }
 
-.toast--ok::before { background: var(--ok); }
-.toast--bad::before { background: var(--bad); }
+.toast--ok::before {
+    background: var(--ok);
+}
 
-.toast--leaving { animation: toast-out 200ms var(--ease) forwards; }
+.toast--bad::before {
+    background: var(--bad);
+}
+
+.toast--leaving {
+    animation: toast-out 200ms var(--ease) forwards;
+}
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translate(-0.75rem, 0.25rem); }
+    from {
+        opacity: 0;
+        transform: translate(-0.75rem, 0.25rem);
+    }
 }
 
 @keyframes toast-out {
-  to { opacity: 0; transform: translate(-0.5rem, 0); }
+    to {
+        opacity: 0;
+        transform: translate(-0.5rem, 0);
+    }
 }
 
 /* ---------------------------------------------------------------- motion */
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-  }
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
 
-  /* Still needs to read as live, so keep the colour and drop the movement. */
-  .row.is-running .rail { background: var(--accent); }
+    /* Still needs to read as live, so keep the colour and drop the movement. */
+    .row.is-running .rail {
+        background: var(--accent);
+    }
 }

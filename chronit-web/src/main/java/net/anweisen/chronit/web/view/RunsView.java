@@ -74,9 +74,9 @@ public final class RunsView {
                                         Ui.metaItem("Visits", tally(record)),
                                         Ui.metaItem("Started by", record.trigger())),
                                 span(cls("disclosure__chevron"), Ui.icon("chevron"))),
-                        div(cls("tl__detail"),
+                        div(cls("fold"), div(cls("tl__detail"),
                                 ol(cls("timeline timeline--nested"),
-                                        Node.each(record.visits(), RunsView::visit)))));
+                                        Node.each(record.visits(), RunsView::visit))))));
     }
 
     /**
@@ -129,7 +129,9 @@ public final class RunsView {
                                 : p(cls("tl__reason"), text(Redactor.redact(visit.detail())))));
     }
 
-    /** The measurements, in the order they get asked about after a failure. */
+    /**
+     * The measurements, in the order they get asked about after a failure.
+     */
     private static Node record(RunRecord.VisitRecord visit) {
         return Node.fragment(
                 // Whether it got into the world at all is the first thing worth knowing, and it
@@ -147,7 +149,9 @@ public final class RunsView {
                         : Node.empty());
     }
 
-    /** Turns the wire enum name into something readable without losing the distinction. */
+    /**
+     * Turns the wire enum name into something readable without losing the distinction.
+     */
     private static String humanOutcome(String outcome) {
         return switch (outcome) {
             case "CLIENT_CLOSED" -> "left cleanly";

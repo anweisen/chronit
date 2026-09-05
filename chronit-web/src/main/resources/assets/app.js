@@ -136,7 +136,15 @@
   function restoreDisclosures(root = document) {
     const open = openSet();
     root.querySelectorAll('details[data-remember]').forEach((element) => {
-      element.open = open.has(element.dataset.remember);
+      const wanted = open.has(element.dataset.remember);
+      if (element.open === wanted) return;
+      // The restored state is computed once with transitions off — reading a layout property is
+      // what forces that — so the chevron arrives already turned. Otherwise a page coming back
+      // with three sections open spins three chevrons at a reader who changed nothing.
+      element.classList.add('is-settling');
+      element.open = wanted;
+      void element.offsetWidth;
+      element.classList.remove('is-settling');
     });
   }
 
@@ -155,6 +163,111 @@
       /* Private browsing: remembering is a convenience, not a requirement. */
     }
   }, true);
+
+  /* ------------------------------------------------------------------ unfolding */
+
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  const unfolding = new WeakMap();
+  let motion = null;
+
+  /**
+   * Motion lives in the stylesheet; these are read once rather than kept as a second copy here.
+   *
+   * Reading them lazily, on the first unfold, keeps a forced style computation out of page load.
+   */
+  function motionTokens() {
+    if (motion) return motion;
+    const root = getComputedStyle(document.documentElement);
+    const number = (name, fallback) => {
+      const value = parseFloat(root.getPropertyValue(name));
+      return Number.isFinite(value) ? value : fallback;
+    };
+    motion = {
+      shortest: number('--unfold-min', 190),
+      longest: number('--unfold-max', 400),
+      span: number('--unfold-span', 900),
+      ease: root.getPropertyValue('--ease-unfold').trim() || 'ease',
+    };
+    return motion;
+  }
+
+  /** The box a <details> shows and hides: the fold that follows its summary. */
+  function foldOf(details) {
+    const summary = details.querySelector(':scope > summary');
+    const fold = summary ? summary.nextElementSibling : null;
+    return fold && fold.classList.contains('fold') ? fold : null;
+  }
+
+  /**
+   * Plays a disclosure open or closed over the height of its fold.
+   *
+   * A <details> switches its content between `display: none` and displayed, and neither a
+   * transition nor a keyframe can carry a height of `auto` across that, so the height is measured
+   * here and played with the Web Animations API.
+   *
+   * Exactly one property moves, on a box that carries no padding of its own. An earlier version
+   * animated the padded body directly, which meant animating its padding too — `height: 0` on a
+   * border-box element still leaves its padding standing — and that put the content on a second,
+   * slower journey of its own: the first line drifted down as the section opened, and the last
+   * stretch of the animation grew nothing but empty padding. Hence `.fold`, a bare clip, with the
+   * padded body inside it holding still.
+   *
+   * Both directions are driven from the click rather than from `toggle`, so opening measures in
+   * the same task as the click. Left to `toggle`, which the browser queues, a frame can paint the
+   * section at full height before the animation has anything to say about it.
+   *
+   * @return true when it took the toggle on, false when the browser should handle it
+   */
+  function unfold(details, opening) {
+    const fold = foldOf(details);
+    if (!fold || reduced.matches || typeof fold.animate !== 'function') return false;
+
+    // Where it is now, before anything changes: zero when closed, and mid-flight when the reader
+    // changed their mind, so a reversal continues from what is on screen.
+    const from = details.open ? fold.getBoundingClientRect().height : 0;
+    if (opening) details.open = true;
+
+    const previous = unfolding.get(details);
+    if (previous) previous.animation.cancel();
+
+    // Measured with the previous animation cancelled, so this is the fold's own height.
+    const to = opening ? fold.getBoundingClientRect().height : 0;
+
+    // A single duration makes a short section feel slow and a tall one feel thrown, so the time
+    // scales with the distance actually travelled.
+    const tokens = motionTokens();
+    const reach = Math.min(1, Math.abs(to - from) / tokens.span);
+    const duration = tokens.shortest + (tokens.longest - tokens.shortest) * reach;
+
+    details.classList.add('is-unfolding');
+    const animation = fold.animate(
+      [{ height: from + 'px' }, { height: to + 'px' }],
+      { duration, easing: tokens.ease });
+
+    unfolding.set(details, { animation, opening });
+    animation.finished.then(() => {
+      // A finished animation settles inside the frame's animation step, before style and paint, so
+      // dropping `open` here closes the section in the same frame the height reached zero rather
+      // than letting one frame of full-height content through.
+      if (!opening) details.open = false;
+      details.classList.remove('is-unfolding');
+      unfolding.delete(details);
+    }, () => {
+      /* Cancelled by the next click, which owns the section from here on. */
+    });
+    return true;
+  }
+
+  document.addEventListener('click', (event) => {
+    const summary = event.target.closest('summary');
+    if (!summary) return;
+    const details = summary.parentElement;
+    if (!(details instanceof HTMLDetailsElement)) return;
+    // Mid-flight, the click reverses what is playing; otherwise it does the obvious thing.
+    const playing = unfolding.get(details);
+    const opening = playing ? !playing.opening : !details.open;
+    if (unfold(details, opening)) event.preventDefault();
+  });
 
   /* ------------------------------------------------------------------ toasts */
 
@@ -293,15 +406,25 @@
    * markup, and parking a copy of it in the DOM to compare against would be worse than the
    * problem.
    *
-   * @return true when the element was actually rewritten
+   * The first payload is reported apart from the rest. The stream opens by sending the state as it
+   * stands, which is the state the server had already rendered into the page — nothing on screen
+   * changes, so animating it makes a page that has only just loaded appear to change its mind. A
+   * region is only ever animated against something this script has seen before.
+   *
+   * @return SAME, FIRST or CHANGED
    */
   const rendered = new WeakMap();
 
+  const SAME = 'same';
+  const FIRST = 'first';
+  const CHANGED = 'changed';
+
   function applyHtml(element, html) {
-    if (rendered.get(element) === html) return false;
+    const previous = rendered.get(element);
+    if (previous === html) return SAME;
     rendered.set(element, html);
     element.innerHTML = html;
-    return true;
+    return previous === undefined ? FIRST : CHANGED;
   }
 
   /**
@@ -313,10 +436,12 @@
    */
   function swap(selector, html, animate = true) {
     const host = document.querySelector(selector);
-    if (!host || !applyHtml(host, html)) return;
+    if (!host) return;
+    const written = applyHtml(host, html);
+    if (written === SAME) return;
     restoreDisclosures(host);
     tickTimes(host);
-    if (animate) enter(host);
+    if (animate && written === CHANGED) enter(host);
   }
 
   /**
@@ -349,7 +474,7 @@
     if (rail && job.railClass) rail.className = 'row__rail rail ' + job.railClass;
 
     const status = card.querySelector('[data-job-status]');
-    if (status && job.statusHtml && applyHtml(status, job.statusHtml)) {
+    if (status && job.statusHtml && applyHtml(status, job.statusHtml) === CHANGED) {
       enter(status);
     }
 
@@ -392,7 +517,11 @@
     const index = job.visitIndex || 0;
     const fill = line.querySelector('.progress__fill');
     if (fill) {
-      const percent = total > 0 ? Math.min(100, Math.max(0, ((index - 1) / total) * 100)) : 0;
+      // Whole percent, over the same denominator Ui.progress uses. The width is transitioned, so
+      // a fraction of a percent between what the server drew and what is computed here is not a
+      // rounding difference nobody sees — it is the bar sliding on a page that has just loaded.
+      const done = Math.max(index - 1, 0);
+      const percent = Math.min(100, Math.floor(done * 100 / Math.max(total, 1)));
       fill.style.width = percent + '%';
     }
     const bar = line.querySelector('[data-progress]');
@@ -424,7 +553,7 @@
     if (rail && account.railClass) rail.className = 'row__rail rail ' + account.railClass;
 
     const status = card.querySelector('[data-account-status]');
-    if (status && account.statusHtml && applyHtml(status, account.statusHtml)) {
+    if (status && account.statusHtml && applyHtml(status, account.statusHtml) === CHANGED) {
       enter(status);
     }
     const detail = card.querySelector('[data-account-detail]');
@@ -534,10 +663,12 @@
     host.innerHTML = '';
     // Each step of the flow replaces the whole panel, so it settles in the same way every other
     // swapped region does — but only when the step actually changed, or a stream reconnect would
-    // re-animate a code the reader is halfway through typing.
+    // re-animate a code the reader is halfway through typing. The first frame is a step the server
+    // has already drawn, so it is written without the entrance too.
     if (previous !== state.state) {
+      const first = previous === undefined;
       host.dataset.shown = state.state || '';
-      enter(host);
+      if (!first) enter(host);
     }
 
     if (state.state === 'IDLE') {

@@ -65,7 +65,9 @@ public final class DashboardView {
     private DashboardView() {
     }
 
-    /** Everything the page needs, gathered once per request. */
+    /**
+     * Everything the page needs, gathered once per request.
+     */
     public record Model(ChronitConfig config,
                         List<Scheduler.Upcoming> upcoming,
                         Map<String, AccountStatus> accounts,
@@ -200,7 +202,9 @@ public final class DashboardView {
                                 needingLogin == 0 ? "accounts" : "need signing in")));
     }
 
-    /** "1 job" but "2 jobs" — the kind of detail whose absence is immediately noticeable. */
+    /**
+     * "1 job" but "2 jobs" — the kind of detail whose absence is immediately noticeable.
+     */
     private static String count(int amount, String noun) {
         return amount + " " + noun + (amount == 1 ? "" : "s");
     }
@@ -298,28 +302,28 @@ public final class DashboardView {
                         // the reveal carries that space inside itself, so a closed one leaves
                         // nothing behind.
                         div(cls("row__lead"),
-                        div(cls("row__head"),
-                                div(cls("row__identity"),
-                                        h3(cls("row__name"), text(job.id())),
-                                        div(cls("row__state"), attr("data-job-status", ""),
-                                                jobState(job, execution, lastRun))),
-                                // One slot, two controls. They cross-fade rather than one vanishing
-                                // and the other appearing, so the row keeps its width at the exact
-                                // moment the pointer is over the button being replaced.
-                                div(cls("row__actions"),
-                                        div(cls("swap"),
-                                                button(cls("btn btn--primary"
-                                                                + (running ? " is-away" : "")),
-                                                        attr("type", "button"),
-                                                        attr("data-run-job", job.id()),
-                                                        attr("data-when", "idle"),
-                                                        Ui.icon("play"), span(text("Run now"))),
-                                                button(cls("btn btn--stop"
-                                                                + (running ? "" : " is-away")),
-                                                        attr("type", "button"),
-                                                        attr("data-cancel-job", job.id()),
-                                                        attr("data-when", "running"),
-                                                        Ui.icon("stop"), span(text("Stop")))))),
+                                div(cls("row__head"),
+                                        div(cls("row__identity"),
+                                                h3(cls("row__name"), text(job.id())),
+                                                div(cls("row__state"), attr("data-job-status", ""),
+                                                        jobState(job, execution, lastRun))),
+                                        // One slot, two controls. They cross-fade rather than one vanishing
+                                        // and the other appearing, so the row keeps its width at the exact
+                                        // moment the pointer is over the button being replaced.
+                                        div(cls("row__actions"),
+                                                div(cls("swap"),
+                                                        button(cls("btn btn--primary"
+                                                                        + (running ? " is-away" : "")),
+                                                                attr("type", "button"),
+                                                                attr("data-run-job", job.id()),
+                                                                attr("data-when", "idle"),
+                                                                Ui.icon("play"), span(text("Run now"))),
+                                                        button(cls("btn btn--stop"
+                                                                        + (running ? "" : " is-away")),
+                                                                attr("type", "button"),
+                                                                attr("data-cancel-job", job.id()),
+                                                                attr("data-when", "running"),
+                                                                Ui.icon("stop"), span(text("Stop")))))),
                                 liveLine(execution, visits.size())),
                         Ui.facts(
                                 // The one number worth reading first on a job, so it leads and it
@@ -439,7 +443,9 @@ public final class DashboardView {
                                                         ? execution.currentServer() : ""))))));
     }
 
-    /** The elapsed clock shown while a job is running, counting up from when it started. */
+    /**
+     * The elapsed clock shown while a job is running, counting up from when it started.
+     */
     private static Node elapsedTime(JobExecution execution) {
         return time(attr("datetime", execution.startedAt().toString()),
                 attr("data-relative", ""),
@@ -469,7 +475,13 @@ public final class DashboardView {
         }
     }
 
-    /** The visit chain, folded away, with open state remembered per job. */
+    /**
+     * The visit chain, folded away, with open state remembered per job.
+     *
+     * <p>The list is wrapped in a {@code fold}: the script plays a disclosure open over the height
+     * of that wrapper, and it can only do so cleanly if the wrapper carries no padding of its own.
+     * See the note on {@code .fold} in app.css.
+     */
     private static Node visitDisclosure(JobConfig job, List<VisitConfig> visits, Model model) {
         if (visits.isEmpty()) {
             return Node.empty();
@@ -486,7 +498,8 @@ public final class DashboardView {
                         span(cls("disclosure__trail"),
                                 text(String.join(" → ", visits.stream()
                                         .map(VisitConfig::server).distinct().toList())))),
-                ul(cls("visits"), Node.fragment(rows.toArray(Node[]::new))));
+                div(cls("fold"),
+                        ul(cls("visits"), Node.fragment(rows.toArray(Node[]::new)))));
     }
 
     private static Node visitRow(Model model, int index, VisitConfig visit) {
@@ -650,7 +663,9 @@ public final class DashboardView {
 
     // ---------------------------------------------------------------- information
 
-    /** Reference detail: true but rarely urgent, so it starts folded. */
+    /**
+     * Reference detail: true but rarely urgent, so it starts folded.
+     */
     private static Node information(Model model) {
         long enabled = model.config().jobsOrEmpty().stream().filter(JobConfig::isEnabled).count();
         long problems = model.runs().stream().filter(run -> run.status().isProblem()).count();
@@ -662,7 +677,7 @@ public final class DashboardView {
                                 span(cls("disclosure__label"), text("Build and paths")),
                                 span(cls("disclosure__trail"),
                                         text("Minecraft " + model.clientVersion()))),
-                        div(cls("disclosure__body"),
+                        div(cls("fold"), div(cls("disclosure__body"),
                                 Ui.facts(
                                         Ui.fact("Minecraft", model.clientVersion()),
                                         Ui.factMono("Protocol", String.valueOf(model.clientProtocol())),
@@ -678,7 +693,7 @@ public final class DashboardView {
                                         Ui.factMono("State directory",
                                                 model.config().stateDirOrDefault().toString()),
                                         Ui.factMono("Pack cache", model.config()
-                                                .stateDirOrDefault().resolve("packs").toString())))));
+                                                .stateDirOrDefault().resolve("packs").toString()))))));
     }
 
     // ---------------------------------------------------------------- dialog
