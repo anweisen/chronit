@@ -10,8 +10,11 @@ import net.anweisen.chronit.web.html.Node;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static net.anweisen.chronit.web.html.H.attr;
 import static net.anweisen.chronit.web.html.H.cls;
@@ -33,6 +36,10 @@ import static net.anweisen.chronit.web.html.H.text;
  * visits on an indented spine of their own. Nothing is boxed — the spine and the node carry the
  * structure, which leaves colour free to mean status rather than decoration.
  *
+ * <p>Only the newest few runs are drawn in full. A daemon that has been up for a month has
+ * hundreds behind it, and the rest continue on the same spine behind one folded row rather than
+ * turning the last band on the page into an endless scroll.
+ *
  * <p>Rendered on its own so the live channel can push just this part when a run finishes, rather
  * than reloading the page. Because it is still the server rendering it, there is only one
  * description of what a run looks like.
@@ -45,6 +52,20 @@ public final class RunsView {
   private static final DateTimeFormatter ABSOLUTE =
       DateTimeFormatter.ofPattern("d MMM, HH:mm", Locale.ENGLISH);
 
+  /**
+   * How many of the newest runs are drawn in full.
+   *
+   * <p>Enough to answer "did the last few go through", which is the question the band is on the
+   * page for. Everything before that is history rather than news, and history is folded.
+   */
+  private static final int LEAD_RUNS = 5;
+
+  /**
+   * The fold has to be worth its own row. Hiding one or two runs behind a control that costs a
+   * row to draw and a click to open saves nothing and adds a thing to read.
+   */
+  private static final int FOLD_MIN = 3;
+
   private RunsView() {
   }
 
@@ -52,7 +73,47 @@ public final class RunsView {
     if (runs.isEmpty()) {
       return Ui.empty("Nothing has run yet. Use “Run now” on a job to try one.").toHtml();
     }
-    return ol(cls("timeline"), Node.each(runs, RunsView::run)).toHtml();
+    if (runs.size() <= LEAD_RUNS + FOLD_MIN) {
+      return ol(cls("timeline"), Node.each(runs, RunsView::run)).toHtml();
+    }
+    return ol(cls("timeline"),
+        Node.each(runs.subList(0, LEAD_RUNS), RunsView::run),
+        older(runs.subList(LEAD_RUNS, runs.size()))).toHtml();
+  }
+
+  /**
+   * The seam, and everything before it.
+   *
+   * <p>A daemon that has been up for a while has hundreds of runs behind it, and a band that
+   * lists them all is a band nobody scrolls past. Only the newest few are news; the rest continue
+   * on the same spine behind one row, which says how many are down there and how they ended.
+   *
+   * <p>It is the disclosure the System band already uses, put on the timeline: the same chevron,
+   * label and fold, so there is nothing new to learn. What it adds is the {@link Ui#tally} — the
+   * reason to open it is that something in there failed, and the marks say whether anything did
+   * without unfolding a hundred rows to find out.
+   */
+  private static Node older(List<RunRecord> runs) {
+    return li(cls("tl tl--more"),
+        details(cls("tl__body"), attr("data-remember", "runs:older"),
+            summary(cls("tl__summary tl__summary--more"),
+                span(cls("disclosure__chevron"), Ui.icon("chevron")),
+                span(cls("disclosure__label"), text(runs.size() + " older runs")),
+                tally(runs)),
+            // The continued list hangs on the spine already running down the page rather than
+            // starting one of its own, exactly as an opened run's visits do.
+            div(cls("fold"),
+                ol(cls("timeline timeline--continued"), Node.each(runs, RunsView::run)))));
+  }
+
+  /** How the folded runs ended, counted by status and left in the enum's own order. */
+  private static Node tally(List<RunRecord> runs) {
+    Map<RunStatus, Long> counts = runs.stream().collect(Collectors.groupingBy(
+        RunRecord::status, () -> new EnumMap<>(RunStatus.class), Collectors.counting()));
+    return Ui.tally(counts.entrySet().stream()
+        .map(entry -> (Node) Ui.count(Ui.toneOf(entry.getKey()),
+            Ui.labelOf(entry.getKey()), entry.getValue()))
+        .toArray(Node[]::new));
   }
 
   private static Node run(RunRecord record) {

@@ -23,9 +23,22 @@ public final class AccountLocks {
 
   /** Blocks until the account is free. Close the lease to release it. */
   public Lease acquire(String accountId) throws InterruptedException {
+    return acquire(accountId, null);
+  }
+
+  /**
+   * The same, telling the caller when the wait is real.
+   *
+   * @param onWait run only if the account is actually busy, so a caller that reports the wait to a
+   *               dashboard does not publish a state change on every uncontended visit
+   */
+  public Lease acquire(String accountId, Runnable onWait) throws InterruptedException {
     ReentrantLock lock = locks.computeIfAbsent(accountId, ignored -> new ReentrantLock(true));
     if (!lock.tryLock()) {
       log.info("Waiting for account '{}' to finish its current visit", accountId);
+      if (onWait != null) {
+        onWait.run();
+      }
       lock.lockInterruptibly();
     }
     return () -> lock.unlock();

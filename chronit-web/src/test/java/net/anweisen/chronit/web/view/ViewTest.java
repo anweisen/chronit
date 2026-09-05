@@ -177,6 +177,51 @@ class ViewTest {
     assertFalse(html.contains("is-bad"), "nothing here failed: " + html);
   }
 
+  /**
+   * A history of any length has to stay the size of a band. Past a handful of runs the older ones
+   * go behind one folded row, still on the same list so nothing is lost.
+   */
+  @Test
+  void olderRunsAreFoldedBehindOneRow() {
+    String short_ = RunsView.render(manyRuns(6));
+    assertFalse(short_.contains("older runs"),
+        "a fold that hides one or two rows is not worth its own row: " + short_);
+
+    String long_ = RunsView.render(manyRuns(20));
+    assertTrue(long_.contains("15 older runs"), long_);
+    assertTrue(long_.contains("timeline--continued"),
+        "the folded runs continue on the same spine: " + long_);
+    assertEquals(20, long_.split("class=\"tl tl--run", -1).length - 1,
+        "every run is still rendered, folded or not: " + long_);
+    assertTrue(long_.contains("class=\"fold\""),
+        "the fold is what the script animates open: " + long_);
+  }
+
+  /** The fold says what is inside it, so nobody has to open it to find a failure. */
+  @Test
+  void theFoldCountsWhatItHides() {
+    String html = RunsView.render(manyRuns(20));
+
+    assertTrue(html.contains("title=\"12 complete\""), html);
+    assertTrue(html.contains("title=\"3 failed\""), html);
+    assertTrue(html.contains("tally__item is-bad"), html);
+  }
+
+  /** Runs newest first, every fifth one a failure. */
+  private static List<RunRecord> manyRuns(int count) {
+    List<RunRecord> runs = new java.util.ArrayList<>();
+    for (int i = 0; i < count; i++) {
+      Instant started = Instant.parse("2026-08-12T18:00:00Z").minusSeconds(i * 3600L);
+      boolean failed = i % 5 == 4;
+      runs.add(new RunRecord("r" + i, "nightly", "schedule", started, started.plusSeconds(60),
+          List.of(new RunRecord.VisitRecord("survival", "main", started, Duration.ofMinutes(1),
+              !failed, failed ? "Connection refused" : "ran 1 action(s)", failed ? 0 : 1, 1,
+              776, false, failed ? null : Duration.ofSeconds(3),
+              failed ? "NETWORK" : "CLIENT_CLOSED"))));
+    }
+    return runs;
+  }
+
   @Test
   void emptyHistoryExplainsItself() {
     String html = RunsView.render(List.of());

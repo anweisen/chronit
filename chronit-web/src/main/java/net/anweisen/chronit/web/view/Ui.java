@@ -21,7 +21,7 @@ import static net.anweisen.chronit.web.html.H.time;
 /**
  * The shared vocabulary every page is built from.
  *
- * <p>Four shapes, and nothing else is invented at a call site:
+ * <p>Five shapes, and nothing else is invented at a call site:
  *
  * <ul>
  *   <li>a {@link #state} — a drawn mark and a word, in the colour of the thing it describes. It is
@@ -33,6 +33,8 @@ import static net.anweisen.chronit.web.html.H.time;
  *       than an anonymous fragment, and two blocks of facts line up with each other.</li>
  *   <li>a {@link #meta} strip — the same pairs in the same voice when they have to fit on one
  *       line, which is only ever a collapsed summary.</li>
+ *   <li>a {@link #tally} — the same marks again, counted, for a fold that has to say what is
+ *       inside it without listing it.</li>
  *   <li>a {@link #rail} — the two-pixel edge that starts every job, account and run. It is the one
  *       device that makes the whole interface look like one interface, and it carries status
  *       without drawing a box around anything.</li>
@@ -128,9 +130,20 @@ public final class Ui {
 
   /** The live state a running job shows instead of a finished one, with its own animation. */
   public static Element liveState(String label) {
+    return liveState(text(label));
+  }
+
+  /**
+   * The same, for a state that has a clock in it.
+   *
+   * <p>A job waiting out a retry says how long is left, and it says it with a {@code <time>} the
+   * script ticks locally: the wait changes the state once, at its start, so a label rendered as
+   * plain text would sit there reading "in 30s" for half a minute.
+   */
+  public static Element liveState(Node label) {
     return span(cls("state is-live"), attr("data-job-state", ""),
         span(cls("state__spinner"), attr("aria-hidden", "true")),
-        span(cls("state__word"), attr("data-job-phase", ""), text(label)));
+        span(cls("state__word"), attr("data-job-phase", ""), label));
   }
 
   /**
@@ -152,6 +165,29 @@ public final class Ui {
     return Node.raw("<svg class='state__mark' viewBox='0 0 12 12' fill='none'"
         + " stroke='currentColor' stroke-width='1.6' stroke-linecap='round'"
         + " stroke-linejoin='round' aria-hidden='true'>" + path + "</svg>");
+  }
+
+  /**
+   * Several statuses counted on one line: each one's mark, and how many of it there are.
+   *
+   * <p>What a folded stretch of history holds, said in the vocabulary the rows inside it are
+   * drawn with anyway. It answers the one question worth asking before opening the fold — is
+   * anything in there wrong — without listing a thing.
+   */
+  public static Element tally(Node... counts) {
+    return span(cls("tally"), Node.fragment(counts));
+  }
+
+  /** One entry of a {@link #tally}: the mark for a status, and the count in that status. */
+  public static Element count(Tone tone, String label, long value) {
+    String described = value + " " + label;
+    return span(cls("tally__item " + tone.className()),
+        // A number beside a mark that is aria-hidden, as every drawn mark here is, is a number
+        // with nothing to say. One name covers the pair instead: role="img" makes it a single
+        // thing called "3 failed" rather than a mark, a digit and a tooltip.
+        attr("role", "img"), attr("aria-label", described), attr("title", described),
+        mark(tone),
+        span(cls("tally__value"), text(String.valueOf(value))));
   }
 
   // ---------------------------------------------------------------- rail
@@ -222,6 +258,27 @@ public final class Ui {
   /** A value worth reading first — the next fire time, the clock on a running job. */
   public static Element factStrong(String label, Node value) {
     return div(cls("fact"), dt(cls("fact__label"), text(label)),
+        dd(cls("fact__value fact__value--strong"), value));
+  }
+
+  /**
+   * One of two {@link #factStrong} rows sharing a single slot, only one of which applies.
+   *
+   * <p>For a fact whose *label* changes with the state, which is a change a script cannot make
+   * without writing the words a second time: a job's clock is "Running for" while it runs and
+   * "Next run" when it does not. Both are rendered, the one that does not apply is faded out of
+   * the same cell, and the script has only a class to flip. Same device as the Run and Stop
+   * buttons, and for the same reason: the block cannot change height at the moment a run ends.
+   *
+   * <p>They are two rows rather than one wrapper holding two, because a {@code <dl>} may contain
+   * only {@code dt}/{@code dd} groups. Sharing the cell is left to the stylesheet.
+   *
+   * @param away  true for the copy that does not currently apply
+   * @param hooks attributes for the caller to find this row by
+   */
+  public static Element factSlot(boolean away, String label, Node value, Node... hooks) {
+    return div(cls("fact fact--slot" + (away ? " is-away" : "")), Node.fragment(hooks),
+        dt(cls("fact__label"), text(label)),
         dd(cls("fact__value fact__value--strong"), value));
   }
 

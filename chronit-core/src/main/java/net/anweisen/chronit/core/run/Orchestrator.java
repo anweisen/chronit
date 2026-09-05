@@ -213,6 +213,7 @@ public final class Orchestrator {
             // Also gives the server time to tear the session down before the same
             // account appears somewhere else.
             log.debug("Pausing {} before the next visit", Durations.format(gap));
+            execution.awaitNextVisit(gap);
             Thread.sleep(gap.toMillis());
           }
         }

@@ -18,6 +18,7 @@ import net.anweisen.chronit.core.util.Redactor;
 import net.anweisen.chronit.web.html.Node;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -327,9 +328,15 @@ public final class DashboardView {
                 liveLine(execution, visits.size())),
             Ui.facts(
                 // The one number worth reading first on a job, so it leads and it
-                // is the only value here set heavier than its neighbours.
-                Ui.factStrong(running ? "Running for" : "Next run",
-                    running ? elapsedTime(execution) : nextRunTime(upcoming)),
+                // is the only value here set heavier than its neighbours. Both of its
+                // states are rendered and share one slot: a row is patched field by
+                // field and never re-rendered, so a clock that is only in the markup
+                // while it applies is a clock that keeps running after the job has
+                // stopped, and one that never appears when a job starts.
+                Ui.factSlot(!running, "Running for", elapsedTime(execution),
+                    attr("data-job-clock", "running")),
+                Ui.factSlot(running, "Next run", nextRunTime(upcoming),
+                    attr("data-job-clock", "idle")),
                 Ui.fact("Schedule", describeCron(job)),
                 Ui.factMono("Timezone", job.zoneOrDefault().getId()),
                 Ui.factMono("Expression", job.cron())),
@@ -338,7 +345,7 @@ public final class DashboardView {
 
   private static Node jobState(JobConfig job, JobExecution execution, Optional<RunRecord> lastRun) {
     if (execution != null) {
-      return Ui.liveState(phaseLabel(execution));
+      return Ui.liveState(liveWord(execution));
     }
     if (!job.isEnabled()) {
       // Neutral rather than skipped. A dash means "this was passed over" and belongs to a
@@ -351,24 +358,62 @@ public final class DashboardView {
   }
 
   /**
-   * The phase in the words an operator uses.
+   * What the job is doing, in the words an operator uses.
    *
    * <p>{@code CONFIGURATION} is where a join spends its time when a server pushes a resource
    * pack, and "configuration" says nothing about the wait; "loading resources" does.
+   *
+   * <p>A phase only describes an open session, and the stretches with no session are the ones a
+   * struggling job spends its night in, so those are asked about first. {@code CLOSED} is then
+   * what it actually is: the moment between a session ending and whatever comes next, which on a
+   * healthy run is too short to read.
    */
   public static String phaseLabel(JobExecution execution) {
     if (execution.isCancelled()) {
       return "stopping";
     }
-    return switch (execution.phase()) {
-      case CONNECTING -> "connecting";
-      case LOGIN -> "authenticating";
-      case CONFIGURATION -> "loading resources";
-      case JOINING -> "entering the world";
-      case IN_WORLD -> "in world";
-      case LEAVING -> "leaving";
-      case CLOSED -> "between visits";
+    return switch (execution.waiting()) {
+      case RETRY -> "retrying";
+      case NEXT_VISIT -> "next visit";
+      case ACCOUNT -> "account in use";
+      case NONE -> switch (execution.phase()) {
+        case CONNECTING -> "connecting";
+        case LOGIN -> "authenticating";
+        case CONFIGURATION -> "loading resources";
+        case JOINING -> "entering the world";
+        case IN_WORLD -> "in world";
+        case LEAVING -> "leaving";
+        case CLOSED -> "wrapping up";
+      };
     };
+  }
+
+  /**
+   * The same, with the countdown as a {@code <time>} the browser owns.
+   *
+   * <p>Nothing here may change while the wait runs, and that is the whole design of it. The word
+   * and the deadline are both fixed for the length of the wait, and the fallback is the wait's
+   * *total* length rather than what is left of it, so every render of a waiting job produces
+   * byte-identical markup. The stream therefore pushes it once; the script ticks it from the
+   * deadline every second after that, and a push that arrives mid-wait is recognised as unchanged
+   * and does not overwrite what the script has counted down to.
+   *
+   * <p>The first attempt at this put the remaining time in the text. That made the pushed snapshot
+   * change every second, so the five-second sweep republished the whole state, the status element
+   * replayed its entrance animation, and the number jumped back to whatever the server had
+   * rendered before ticking on again. Two numbers alternating is what a reader sees when a
+   * fragment is pushed more often than the thing inside it stands still.
+   */
+  private static Node liveWord(JobExecution execution) {
+    // No deadline to show: a phase, a stop, or a wait on an account, which lasts exactly as long
+    // as the visit holding it and so cannot be counted down at all. The word alone says it.
+    Instant until = execution.isCancelled() ? null : execution.waitingUntil();
+    Duration length = execution.waitingFor();
+    if (until == null || length == null) {
+      return text(phaseLabel(execution));
+    }
+    return Node.fragment(text(phaseLabel(execution) + " "),
+        Ui.relativeTime(until, "in " + Durations.format(length)));
   }
 
   /**
@@ -435,24 +480,66 @@ public final class DashboardView {
                 Ui.progress(Math.max(index - 1, 0), Math.max(total, 1)),
                 div(cls("live-line__facts"),
                     span(cls("live-line__step"), attr("data-live-step", ""),
-                        text(total > 0
-                            ? "visit " + Math.max(index, 1) + " of " + total
-                            : "")),
+                        text(running ? step(execution, total) : "")),
                     span(cls("live-line__where"), attr("data-live-where", ""),
                         text(running && execution.currentServer() != null
-                            ? execution.currentServer() : ""))))));
+                            ? execution.currentServer() : ""))),
+                // Why it is waiting, when it is waiting because something went wrong. The one
+                // thing the page could not say before: a job against a server that is not
+                // answering sat on a spinner for half a minute at a time without ever
+                // mentioning that anything had failed.
+                //
+                // A reveal of its own, inside the row's reveal, because it comes and goes on its
+                // own schedule: a failure appears when an attempt fails and is gone again when
+                // the next one starts, both of them while the row around it stays open.
+                whyLine(running ? whyWaiting(execution) : ""))));
+  }
+
+  /** The failure line, closed when there is nothing to say. */
+  private static Node whyLine(String reason) {
+    return div(cls(reason.isEmpty() ? "reveal" : "reveal is-shown"), attr("data-live-why", ""),
+        // The bare clip every reveal needs: no padding of its own, or a closed one keeps its
+        // height. The gap that separates this from the line above belongs to the grid.
+        div(p(cls("live-line__why"), attr("data-live-why-text", ""), text(reason))));
+  }
+
+  /** "visit 2 of 3, attempt 1 of 2" — and no attempt clause at all when there is only ever one. */
+  private static String step(JobExecution execution, int total) {
+    if (total <= 0) {
+      return "";
+    }
+    String step = "visit " + Math.max(execution.visitIndex(), 1) + " of " + total;
+    return execution.attemptsAllowed() > 1
+        ? step + ", attempt " + execution.attempt() + " of " + execution.attemptsAllowed()
+        : step;
+  }
+
+  /** The failure the current wait is a consequence of, redacted like every other detail. */
+  private static String whyWaiting(JobExecution execution) {
+    String reason = execution.waitingReason();
+    return reason == null || reason.isBlank() ? "" : Redactor.redact(reason);
   }
 
   /**
    * The elapsed clock shown while a job is running, counting up from when it started.
    */
+  /**
+   * The clock a running job counts up on.
+   *
+   * <p>Rendered for an idle job too, out of sight in the slot beside "Next run", so that a job
+   * starting has a clock to retarget rather than an element to invent. Its start is then whenever
+   * the page was drawn, which is wrong by exactly as long as it is invisible: the update that
+   * shows it is the same one that gives it the real instant.
+   */
   private static Node elapsedTime(JobExecution execution) {
-    return time(attr("datetime", execution.startedAt().toString()),
+    Instant startedAt = execution == null ? Instant.now() : execution.startedAt();
+    Duration elapsed = execution == null ? Duration.ZERO : execution.elapsed();
+    return time(attr("datetime", startedAt.toString()),
         attr("data-relative", ""),
         attr("data-elapsed", ""),
         attr("data-job-elapsed", ""),
-        attr("title", execution.startedAt().toString()),
-        text(Durations.format(execution.elapsed())));
+        attr("title", startedAt.toString()),
+        text(Durations.format(elapsed)));
   }
 
   private static Node nextRunTime(Optional<Scheduler.Upcoming> upcoming) {
@@ -657,7 +744,7 @@ public final class DashboardView {
 
   private static Node runs(Model model) {
     return band("runs", "History",
-        "Newest first. Every run is kept, including the ones that were stopped.",
+        "Newest first. The last few in full, everything before them folded.",
         div(attr("data-runs", ""), Node.raw(RunsView.render(model.runs()))));
   }
 

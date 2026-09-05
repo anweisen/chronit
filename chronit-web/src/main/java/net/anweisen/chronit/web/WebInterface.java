@@ -15,6 +15,7 @@ import net.anweisen.chronit.core.run.JobExecution;
 import net.anweisen.chronit.core.run.Orchestrator;
 import net.anweisen.chronit.core.run.Scheduler;
 import net.anweisen.chronit.core.state.RunRecord;
+import net.anweisen.chronit.core.util.Redactor;
 import net.anweisen.chronit.web.view.DashboardView;
 import net.anweisen.chronit.web.view.LoginView;
 import net.anweisen.chronit.web.view.RunsView;
@@ -501,8 +502,18 @@ public final class WebInterface {
       job.put("visitIndex", execution == null ? 0 : execution.visitIndex());
       job.put("visitCount", execution == null ? 0 : execution.visitCount());
       job.put("attempt", execution == null ? 0 : execution.attempt());
+      job.put("attempts", execution == null ? 0 : execution.attemptsAllowed());
       job.put("phase", execution == null ? null : execution.phase().name());
       job.put("phaseLabel", execution == null ? null : DashboardView.phaseLabel(execution));
+      // A job with no session open is waiting on something: the backoff before another attempt,
+      // or the gap before the next visit. Which one, until when, and what went wrong.
+      job.put("waiting", execution == null ? null : execution.waiting().name());
+      job.put("waitingUntil", execution == null || execution.waitingUntil() == null
+          ? null : execution.waitingUntil().toString());
+      // Redacted here as well as in the view: a failure detail can quote the action that
+      // failed, and the likeliest action to fail is a server login.
+      job.put("waitingReason", execution == null || execution.waitingReason() == null
+          ? null : Redactor.redact(execution.waitingReason()));
 
       RunRecord last = history.stream()
           .filter(run -> run.jobId().equals(upcoming.jobId()))

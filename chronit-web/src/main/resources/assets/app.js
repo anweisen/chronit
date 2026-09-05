@@ -133,18 +133,30 @@
    * Without this, anyone watching one job has to re-open it after every content swap, which is
    * exactly the audience most likely to have it open in the first place.
    */
+  /**
+   * Makes a change with transitions off, so the element arrives in its new state rather than on
+   * its way to it.
+   *
+   * For changes the reader cannot see happening: a section being put back the way they left it, or
+   * something inside a row that is closed. Animating those spends motion on nothing, and worse,
+   * plays a second animation against whatever the row itself is doing. Reading a layout property
+   * between the two is what forces the style to be computed while transitions are still off.
+   */
+  function settle(element, change) {
+    element.classList.add('is-settling');
+    change();
+    void element.offsetWidth;
+    element.classList.remove('is-settling');
+  }
+
   function restoreDisclosures(root = document) {
     const open = openSet();
     root.querySelectorAll('details[data-remember]').forEach((element) => {
       const wanted = open.has(element.dataset.remember);
       if (element.open === wanted) return;
-      // The restored state is computed once with transitions off — reading a layout property is
-      // what forces that — so the chevron arrives already turned. Otherwise a page coming back
-      // with three sections open spins three chevrons at a reader who changed nothing.
-      element.classList.add('is-settling');
-      element.open = wanted;
-      void element.offsetWidth;
-      element.classList.remove('is-settling');
+      // Restoring is not a change of mind: the chevron arrives already turned. Otherwise a page
+      // coming back with three sections open spins three chevrons at a reader who changed nothing.
+      settle(element, () => { element.open = wanted; });
     });
   }
 
@@ -239,7 +251,12 @@
     const reach = Math.min(1, Math.abs(to - from) / tokens.span);
     const duration = tokens.shortest + (tokens.longest - tokens.shortest) * reach;
 
+    // The arrow is part of the same gesture, so it is told the same duration and, while a section
+    // is closing, that it is closing: `open` stays set until the height reaches zero, so the
+    // stylesheet cannot work the direction out on its own.
+    details.style.setProperty('--unfold-duration', duration + 'ms');
     details.classList.add('is-unfolding');
+    details.classList.toggle('is-folding', !opening);
     const animation = fold.animate(
       [{ height: from + 'px' }, { height: to + 'px' }],
       { duration, easing: tokens.ease });
@@ -250,7 +267,8 @@
       // dropping `open` here closes the section in the same frame the height reached zero rather
       // than letting one frame of full-height content through.
       if (!opening) details.open = false;
-      details.classList.remove('is-unfolding');
+      details.classList.remove('is-unfolding', 'is-folding');
+      details.style.removeProperty('--unfold-duration');
       unfolding.delete(details);
     }, () => {
       /* Cancelled by the next click, which owns the section from here on. */
@@ -492,8 +510,9 @@
 
     applyLiveLine(card, job);
 
-    // While running, the datum counts up from the start; otherwise it counts down to the next
-    // fire time. Retarget whichever one is in the DOM.
+    // Both clocks are in the row: the one counting up from the start of this run, and the one
+    // counting down to the next fire time. Retarget them first, then show whichever applies, so
+    // the one that comes into view is already reading the right thing.
     const elapsed = card.querySelector('[data-job-elapsed]');
     if (elapsed && job.startedAt && elapsed.getAttribute('datetime') !== job.startedAt) {
       elapsed.setAttribute('datetime', job.startedAt);
@@ -504,13 +523,26 @@
       next.setAttribute('datetime', job.nextRun);
       next.textContent = relativeLabel(job.nextRun);
     }
+    // A row is patched, never re-rendered, so this is the only thing that stops a finished job
+    // from going on counting the run it has already finished.
+    const running = card.querySelector('[data-job-clock="running"]');
+    const idle = card.querySelector('[data-job-clock="idle"]');
+    if (running) running.classList.toggle('is-away', !job.running);
+    if (idle) idle.classList.toggle('is-away', !!job.running);
   }
 
   function applyLiveLine(card, job) {
     const line = card.querySelector('[data-job-live]');
     if (!line) return;
+    // Whether the row was already open decides whether anything inside it may animate. A change
+    // made while it is shut, or in the same update that shuts it, is one the reader cannot see
+    // happening — and animating it would put a second motion against the row's own.
+    const wasOpen = line.classList.contains('is-shown');
     // A reveal, so it opens and closes its own height rather than blinking into existence.
     line.classList.toggle('is-shown', job.running);
+    // A finished run leaves everything inside as it was, so the row collapses with its content
+    // intact: one gesture, not a row emptying itself and then closing. What is in there is
+    // invisible and out of the accessibility tree until the next run puts it right.
     if (!job.running) return;
 
     const total = job.visitCount || 0;
@@ -532,7 +564,10 @@
 
     const step = line.querySelector('[data-live-step]');
     if (step) {
-      const attempt = job.attempt > 1 ? ', attempt ' + job.attempt : '';
+      // Attempts are only worth naming when there can be more than one of them.
+      const attempt = job.attempts > 1
+        ? ', attempt ' + job.attempt + ' of ' + job.attempts
+        : '';
       step.textContent = total > 0
         ? 'visit ' + Math.max(index, 1) + ' of ' + total + attempt
         : '';
@@ -540,6 +575,29 @@
     const where = line.querySelector('[data-live-where]');
     if (where) {
       where.textContent = job.currentServer || '';
+    }
+    applyWhy(line, job.waitingReason || '', wasOpen);
+  }
+
+  /**
+   * The failure line under a running job: open while there is one, closed while there is not.
+   *
+   * The text is only ever written when there is something to write, so a line on its way out keeps
+   * what it said until it has gone. Blanking it first would collapse it in two steps — the words
+   * vanishing, then the space — where the reader should see one.
+   */
+  function applyWhy(line, message, animate) {
+    const why = line.querySelector('[data-live-why]');
+    if (!why) return;
+    const body = why.querySelector('[data-live-why-text]');
+    if (body && message) body.textContent = message;
+
+    const show = message !== '';
+    if (why.classList.contains('is-shown') === show) return;
+    if (animate) {
+      why.classList.toggle('is-shown', show);
+    } else {
+      settle(why, () => why.classList.toggle('is-shown', show));
     }
   }
 

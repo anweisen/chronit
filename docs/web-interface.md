@@ -56,6 +56,14 @@ the hierarchy is carried by where the content begins. Inside an expanded run eac
 so who and how it went, then the record as a table, then the reason. Nothing sits beside anything else, because two
 blocks competing for the left edge of a row give the eye two places to start.
 
+Only the newest five runs are drawn in full. A daemon that has been up for a month has hundreds behind it, and a band
+that lists them all is a band nobody scrolls past, so the rest continue on the same spine behind one folded row. That
+row says how many are down there and counts how they ended, in the same marks the runs themselves use, so the question
+that would make you open it (did anything fail while you were away) is already answered. It gets no node, because
+nothing happened there: the spine goes dashed for the height of the row instead, which reads as elided time whether the
+fold is open or shut. Opening it unfolds the rest in place, and like every other disclosure it stays the way you left
+it.
+
 The confirmation is a native `<dialog>`, so focus trapping, the backdrop and escape-to-dismiss are the browser's job.
 
 ## Layout and motion
@@ -73,12 +81,32 @@ Because the page is pushed to and never reloaded, things arrive while you are lo
 single frame. Everything state-driven uses one of three devices, which is what stops a job starting from looking
 different to an account expiring. A **reveal** opens and closes its own height, so the row settles instead of jumping;
 the progress line under a running job is one. A **swap** is two controls sharing one grid cell, so *Run now* and *Stop*
-cross-fade in place and the row cannot resize under the pointer at the moment the button beneath it is replaced. An
+cross-fade in place and the row cannot resize under the pointer at the moment the button beneath it is replaced. The
+clock beside them shares a slot the same way, because a row is patched field by field and never re-rendered: a job's
+lead fact is "Running for" while it runs and "Next run" when it does not, and rendering only the one that applies left
+whichever the page happened to load with, counting up a run that had already finished. An
 **unfold** is a disclosure opening: expanding a run plays its visits open over their own height rather than dropping
 them onto the page, and closing it plays the same thing backwards. Height is the only thing that moves there, because a
 fade is how this page says a value changed, and showing what was already written is not a change. Clicking again part
-way through reverses whatever is playing. Content the server re-rendered does lift a hair and settle as it lands. All of
-it is skipped under `prefers-reduced-motion`.
+way through reverses whatever is playing, and the arrow turns on the fold's own clock rather than one of its own, in
+both directions: a closing section holds `open` until its height reaches zero, so the stylesheet is told which way it is
+going instead of inferring it and leaving the arrow to snap round at the end. Content the server re-rendered does lift a
+hair and settle as it lands. All of it is skipped under `prefers-reduced-motion`.
+
+Reveals nest, and that brings the second rule: **only animate what the reader can see.** The failure line under a
+running job is its own reveal inside the row's reveal, because it comes and goes on its own schedule, appearing when an
+attempt fails and going again when the next one starts while the row around it stays open. But when the run itself
+finishes, the row closes and everything in it goes down with it as one gesture: the line does not first fold itself
+away inside a box that is already folding, and it does not blank its text first either, which would collapse in two
+steps what the reader should see as one. Changes made to a row while it is shut are put in place with transitions off,
+so the next run opens on a row that is already right rather than one still arranging itself.
+
+A reveal inside a grid takes its spacing as a margin rather than a row-gap, and that is not a preference. A gap is kept
+between two tracks whatever the item in them does, so a collapsed reveal in a gapped grid leaves its gap behind as dead
+space; a negative margin does not rescue it either, because that moves the item inside its track instead of shrinking
+the grid. The margin belongs to the reveal, and `margin-top` is on its transition list, so the space closes with the
+height instead of after it.
+
 
 An unfold is the one piece of motion that moves the whole page beneath it, and the only one whose distance is unknown
 until it runs: a job's visit chain is a few lines, an expanded run is most of a screen. So it is the only one with its
@@ -150,6 +178,18 @@ Every foreground colour clears 4.5:1 against its background in both themes, meas
 more here than the ratio usually suggests, because the labels are eleven-pixel uppercase mono, which is exactly the size
 at which a merely tasteful grey stops being legible. The faintest grey on the page is 6.3:1 in dark and 4.9:1 in light.
 
+Colour that carries meaning rather than text is held to 3:1, the threshold for a graphical object. That covers the
+marks, the timeline nodes and the rails, and it is what sets `--tone-edge`: a rail is a tone mixed with transparent,
+which mixes it toward the page, and in light mode that means toward white. At the 45 percent it used to be, a rail
+landed between 1.8:1 and 2.8:1 depending on which status it showed and which theme you were in, so the device that is
+supposed to make the whole page one page was the least reliable thing on it. At 80 percent every tone clears 3:1 in
+both themes, and the rail stays quieter than the node at its head by being two pixels wide rather than by being pale.
+
+The one line held to the same 3:1 is `--line-strong`, which is not a separator but the boundary of a control: a button,
+an input, the spinner track. Hairlines that only separate stay where they were, around 1.2:1, because a page whose
+structure is drawn in whispers is the point.
+
+
 ## How it is built
 
 Server-rendered pages on the JDK's own HTTP server. No framework, no JavaScript build step, and it works with scripting
@@ -168,6 +208,16 @@ stopped appears the moment it happens, and the live line under a running job nam
 (`loading resources`,
 `entering the world`) instead of saying "running" for a minute and a half.
 
+A phase describes an open session, and a job that is having a bad night spends almost none of its run in one: a server
+that refuses the connection fails in milliseconds and is then followed by a backoff of half a minute. So the three
+stretches with no session say what they are instead of reporting the session that just closed. `retrying in 24s` counts
+down to the next attempt and prints the failure it is retrying past, so nothing has to be inferred from a spinner that
+has been turning for a while. `next visit in 8s` is the configured gap. `account in use` is a visit whose account is
+signed in somewhere else, which is the one wait with no deadline to show, because it lasts exactly as long as the other
+visit does. Alongside it the step reads `visit 2 of 3, attempt 2 of 2`, so how much of the chain is left and how many
+tries this server has left are both on the page.
+
+
 Server-sent events, not WebSockets, and that is a decision rather than a shortcut. The JDK's HTTP server, which this is
 built on so the image does not have to carry a servlet container, offers no way to hand a request's socket over for a
 protocol upgrade. A WebSocket would mean either a second listener on another port with its own authentication, or an
@@ -181,6 +231,15 @@ keep up is served the newest value of each event and never a backlog, and one th
 bar says whether the stream is actually connected, because on a page that no longer polls that is the one thing a reader
 cannot otherwise tell; a stream refused with a 401 sends the reader back to the sign-in form instead of blinking
 *offline* forever. Countdowns tick locally from embedded timestamps, so staying current costs no requests at all.
+
+That last one is a rule, not a convenience: **nothing pushed may contain a value that changes on its own.** A waiting
+job carries the deadline and the length of the wait, both fixed for as long as the wait lasts, and the remaining time
+is computed in the browser. Put the remaining time in the pushed markup instead and every render differs from the last,
+so the five-second sweep republishes a state nothing has changed about, the element replays its entrance animation, and
+the number snaps back to whatever the server rendered before ticking on again. Two numbers alternating in one place is
+what that looks like from the outside. The fallback text a render does carry is the wait's total length rather than
+what is left of it, which keeps the markup identical on every render and is still true for a reader with no script.
+
 Actions go through `fetch` and answer with a toast, not a blind redirect.
 
 The stylesheet and script are served as cacheable assets with a content-hashed URL and an ETag. A five-second sweep

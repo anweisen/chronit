@@ -87,7 +87,8 @@ public final class VisitRunner {
 
     // The same account must never be on two servers at once: logging in again invalidates the
     // earlier session server-side, so overlapping visits would silently kick each other.
-    try (AccountLocks.Lease ignored = locks.acquire(account.id())) {
+    try (AccountLocks.Lease ignored = locks.acquire(account.id(),
+        execution == null ? null : () -> execution.awaitAccount(account.id()))) {
       String failure = null;
       // Kept from the final attempt so a failed visit can still say how far it got.
       Duration lastTimeToReady = null;
@@ -101,12 +102,18 @@ public final class VisitRunner {
             Duration backoff = retry.backoffFor(attempt - 1);
             log.info("Retrying {} (attempt {}/{}) in {}",
                 server.id(), attempt, attempts, Durations.format(backoff));
+            // Where a job against an unreachable server spends nearly all of its time, so the
+            // dashboard is told what the wait is for and when it ends rather than being left to
+            // report the closed session from the attempt that failed.
+            if (execution != null) {
+              execution.awaitRetry(backoff, attempt, failure);
+            }
             Thread.sleep(backoff.toMillis());
           }
 
           attemptsMade = attempt;
           if (execution != null) {
-            execution.beginVisit(visitIndex, server.id(), account.id(), attempt);
+            execution.beginVisit(visitIndex, server.id(), account.id(), attempt, attempts);
           }
           Attempt result = attemptVisit(visit, server, account, attempt, execution);
 

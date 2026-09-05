@@ -111,7 +111,10 @@
   --bg-sunken: #07080a;
   --line: #1f232a;
   --line-soft: #171a1f;
-  --line-strong: #313640;
+  /* The boundary of a control: a button, an input, the spinner track. It is the one line on
+   * the page that has to clear 3:1, because it is what says "this is a thing you can use", so
+   * it is a step louder than the hairlines that merely separate. */
+  --line-strong: #5e626a;
   --fg: #e7e9ee;
   --fg-muted: #aab1bd;
   --fg-faint: #8b929e;
@@ -124,6 +127,13 @@
   /* Stopped is deliberately cool rather than red: someone who pressed stop knows what they did. */
   --stop: #93a3d6;
   --skip: #7c8490;
+
+  /* How much of a tone survives in a one or two pixel edge — the rail, a run's quote bar, a
+   * control's coloured border. Mixing with transparent mixes toward the page, which in light
+   * mode means toward white, and below about 76% that drops the palest tone under 3:1 there.
+   * So this is the floor, measured, not a taste dial: one number for both themes, and the rail
+   * stays quieter than the node at its head by being two pixels wide rather than by being pale. */
+  --tone-edge: 80%;
 
   --radius: 10px;
   --radius-sm: 6px;
@@ -166,7 +176,7 @@
     --bg-sunken: #f2f2f0;
     --line: #e3e3df;
     --line-soft: #ededea;
-    --line-strong: #c4c4be;
+    --line-strong: #91918d;
     --fg: #14161a;
     --fg-muted: #545a64;
     --fg-faint: #696f78;
@@ -193,7 +203,7 @@
   --bg-sunken: #f2f2f0;
   --line: #e3e3df;
   --line-soft: #ededea;
-  --line-strong: #c4c4be;
+  --line-strong: #91918d;
   --fg: #14161a;
   --fg-muted: #545a64;
   --fg-faint: #696f78;
@@ -778,7 +788,7 @@ svg {
   bottom: 0.2rem;
   width: 2px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--tone, var(--fg-faint)) 45%, transparent);
+  background: color-mix(in srgb, var(--tone, var(--fg-faint)) var(--tone-edge), transparent);
 }
 
 .rail__node {
@@ -809,11 +819,16 @@ svg {
  * the same wavelength whatever the height of the row it belongs to. Linear timing, because any
  * easing would visibly slow down and speed up once per cycle. */
 .row.is-running .rail {
-  background-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  /* The rail underneath is an ordinary accent rail at the same strength as every other rail on
+   * the page, so a running job is never marked by something fainter than a finished one. The
+   * travelling band therefore cannot be the accent itself: it has to out-contrast the rail it
+   * runs along, so it carries the tone toward the foreground. That brightens it against a dark
+   * page and darkens it against a light one, which is the same gesture in both themes. */
+  background-color: color-mix(in srgb, var(--accent) var(--tone-edge), transparent);
   background-image: linear-gradient(
       to bottom,
       transparent 0%,
-      var(--accent) 50%,
+      color-mix(in srgb, var(--accent) 55%, var(--fg)) 50%,
       transparent 100%
   );
   background-repeat: repeat-y;
@@ -948,6 +963,35 @@ svg {
   }
 }
 
+/* ---------------------------------------------------------------- tally */
+
+/* Several statuses counted on one line, in the marks the rows themselves use. It exists for a
+ * fold that has to say what is inside it without listing it, so it is deliberately small and
+ * quiet: it is a summary of things not on screen, not a set of figures to read. */
+.tally {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.tally__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  color: var(--tone, var(--fg-muted));
+  font: var(--text-label);
+  letter-spacing: var(--track-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A shade under the state mark beside a headline: this one sits next to 11px type. */
+.tally__item .state__mark {
+  width: 11px;
+  height: 11px;
+}
+
 /* ---------------------------------------------------------------- facts */
 
 /* The one table. Labels in a column of a single fixed width, so every block of facts anywhere on
@@ -971,6 +1015,23 @@ svg {
     grid-template-columns: var(--label-column) minmax(0, 1fr);
     gap: 0.35rem 1rem;
   }
+}
+
+/* Two facts sharing the table's first cell, of which one applies: a job's clock is "Running for"
+ * while it runs and "Next run" when it does not, and both the label and the value change. They
+ * cross-fade in place, the same device as the Run and Stop buttons, so the table cannot change
+ * height at the moment a run ends.
+ *
+ * Placed rather than wrapped: a <dl> may hold only dt/dd groups, and .facts is a single column, so
+ * putting both in the first cell is enough — the rows that follow auto-place from the second. */
+.fact--slot {
+  grid-area: 1 / 1;
+  transition: opacity var(--speed) var(--ease), visibility var(--speed);
+}
+
+.fact--slot.is-away {
+  opacity: 0;
+  visibility: hidden;
 }
 
 .fact__label {
@@ -1057,9 +1118,26 @@ svg {
   transition: width 400ms var(--ease);
 }
 
+/* Spaced with margins rather than a gap, because one of these children is a reveal. A row-gap is
+ * kept between two tracks whatever the item in them does, so a collapsed reveal would still leave
+ * half a rem of dead space under the row — and a negative margin does not help, since it moves the
+ * item inside its track instead of shrinking the grid. A margin belongs to the reveal itself, and
+ * margin-top is on every reveal's transition list already, so the space closes with the height
+ * rather than after it.
+ *
+ * On the child combinator, not on the children, so nothing can cancel it by setting `margin: 0`
+ * later in the file — which is exactly how this move went wrong the last time it was made. */
 .live-line {
+  --live-gap: 0.5rem;
   display: grid;
-  gap: 0.5rem;
+}
+
+.live-line > * + * {
+  margin-top: var(--live-gap);
+}
+
+.live-line > .reveal:not(.is-shown) {
+  margin-top: 0;
 }
 
 .live-line__facts {
@@ -1074,6 +1152,16 @@ svg {
 
 .live-line__where {
   color: var(--accent);
+}
+
+/* Why a running job is waiting: the failure the backoff is a consequence of. The note voice, the
+ * same one a finished visit gives its reason in, so the live line and the history say the same
+ * kind of thing the same way. It opens and closes with the reveal wrapped around it. */
+.live-line__why {
+  margin: 0;
+  color: var(--fg-muted);
+  font: var(--text-note);
+  overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------- disclosure */
@@ -1100,16 +1188,31 @@ svg {
   color: var(--fg);
 }
 
+/* The arrow turns with the section, not on a clock of its own: the script puts the duration it
+ * is about to play on the <details> as --unfold-duration, and the turn takes that duration and
+ * the unfold's easing. With its own 170ms hard ease-out it finished long before a tall section
+ * had, which reads as two things happening rather than one thing opening. The fallback is for
+ * a browser or a reader the script never animates for (reduced motion, no .fold). */
 .disclosure__chevron {
   display: inline-flex;
   font-size: 0.9rem;
   color: var(--fg-faint);
-  transition: transform var(--speed) var(--ease);
+  transition: transform var(--unfold-duration, var(--speed)) var(--ease-unfold);
 }
 
 .disclosure[open] > .disclosure__summary .disclosure__chevron,
 details[open] > .tl__summary .disclosure__chevron {
   transform: rotate(90deg);
+}
+
+/* Closing holds `open` until the height reaches zero — drop it any earlier and the browser hides
+ * the content in the first frame, leaving nothing to animate. So `[open]` cannot be what turns
+ * the arrow back: keyed on it, the arrow stood still through the entire close and then snapped
+ * round at the end, and the same gesture looked like two different gestures depending on which
+ * way it was going. The script marks the direction instead. */
+.disclosure.is-folding > .disclosure__summary .disclosure__chevron,
+details.is-folding > .tl__summary .disclosure__chevron {
+  transform: none;
 }
 
 .disclosure__label {
@@ -1229,6 +1332,9 @@ details[open] > .tl__summary .disclosure__chevron {
 
 .timeline {
   --node: 7px;
+  /* How far a row is set in from the spine. The nested lists pull themselves back by it, and
+   * the seam reaches back over it to draw on the line. */
+  --tl-indent: 1.6rem;
   /* Centre of the spine, and therefore of every node hung on it. */
   --spine: 3.5px;
   /* Half the line box of a headline (0.9375rem at 1.4), so a node sits on the middle of the text
@@ -1257,7 +1363,7 @@ details[open] > .tl__summary .disclosure__chevron {
 
 .tl {
   position: relative;
-  padding-left: 1.6rem;
+  padding-left: var(--tl-indent);
 }
 
 /* The separator sits on the body rather than the row, so it starts to the right of the spine
@@ -1290,11 +1396,11 @@ details[open] > .tl__summary .disclosure__chevron {
   background: var(--tone);
 }
 
-/* A node that was never reached is drawn faintly rather than with a dotted ring, which at five
+/* A node that was never reached takes the softened edge rather than a dotted ring, which at five
  * pixels across renders as a broken circle rather than a deliberate one. The dash in its state
- * mark is what says "not reached"; the node only has to be present and quiet. */
+ * mark is what says "not reached"; the node only has to be present, and a shade quieter. */
 .tl.is-skip .tl__node {
-  border-color: color-mix(in srgb, var(--tone) 55%, transparent);
+  border-color: color-mix(in srgb, var(--tone) var(--tone-edge), transparent);
 }
 
 /* Stacked, never side by side: the identity line, then the summary pairs. Two blocks competing
@@ -1354,7 +1460,7 @@ details[open] > .tl__summary .disclosure__chevron {
  * Their content is then indented a step further than a run's, so the hierarchy is carried by where
  * the text starts rather than by a duplicate spine. */
 .timeline--nested {
-  margin-left: -1.6rem;
+  margin-left: calc(-1 * var(--tl-indent));
 }
 
 .timeline--nested::before {
@@ -1378,10 +1484,74 @@ details[open] > .tl__summary .disclosure__chevron {
 
 .tl__reason {
   padding-left: 0.75rem;
-  border-left: 2px solid color-mix(in srgb, var(--tone, var(--fg-faint)) 40%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--tone, var(--fg-faint)) var(--tone-edge), transparent);
   color: var(--fg-muted);
   font: var(--text-note);
   overflow-wrap: anywhere;
+}
+
+/* The seam. Above it are the runs worth reading now; behind it is everything before that, folded
+ * so the last band on the page stays the length of a band.
+ *
+ * It is the disclosure the System band uses, hung on the timeline: chevron, label, fold. What it
+ * does not get is a node, because nothing happened here. The spine goes dashed for the height of
+ * the row instead, which is the one mark that reads as elided time whether the fold is open or
+ * shut. Both pseudo-elements sit on the summary rather than on the row, so an open fold does not
+ * run dashes down the side of everything it revealed. */
+.tl__summary--more {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 0.85rem 0;
+  color: var(--fg-muted);
+  transition: color var(--speed) var(--ease);
+}
+
+.tl__summary--more:hover {
+  color: var(--fg);
+}
+
+/* The spine runs in the row's left padding, which is outside this box. */
+.tl__summary--more::before,
+.tl__summary--more::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+/* Covers the solid line, so the dashes replace it rather than sit on top of it. */
+.tl__summary--more::before {
+  left: calc(var(--spine) - var(--tl-indent) - 1.5px);
+  width: 3px;
+  background: var(--bg);
+}
+
+.tl__summary--more::after {
+  left: calc(var(--spine) - var(--tl-indent) - 0.5px);
+  width: 1px;
+  background-image: linear-gradient(var(--line) 50%, transparent 50%);
+  background-size: 1px 6px;
+}
+
+/* The chevron of a run sits out at the right margin; here it leads the label, as it does on every
+ * other disclosure on the page. */
+.tl__summary--more .disclosure__chevron {
+  position: static;
+}
+
+/* The folded runs continue on the spine already running down the page, the same way an opened
+ * run's visits do — pulled back by the indent their parent applied, and drawing no line of their
+ * own. They are runs, not children of one, so their nodes keep a run's size. */
+.timeline--continued {
+  margin-left: calc(-1 * var(--tl-indent));
+}
+
+.timeline--continued::before {
+  content: none;
 }
 
 /* ---------------------------------------------------------------- buttons */
@@ -1416,7 +1586,7 @@ details[open] > .tl__summary .disclosure__chevron {
 }
 
 .btn--primary {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  border-color: color-mix(in srgb, var(--accent) var(--tone-edge), transparent);
   color: var(--accent);
 }
 
@@ -1426,7 +1596,7 @@ details[open] > .tl__summary .disclosure__chevron {
 }
 
 .btn--stop {
-  border-color: color-mix(in srgb, var(--stop) 55%, transparent);
+  border-color: color-mix(in srgb, var(--stop) var(--tone-edge), transparent);
   color: var(--stop);
 }
 
