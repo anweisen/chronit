@@ -128,7 +128,10 @@ public final class RunsView {
                     h3(cls("tl__title"), text(record.jobId())),
                     Ui.state(status),
                     span(cls("tl__when"),
+                        // Relative, because that is what the script writes over it a moment
+                        // later; the date itself is on hover rather than in the timeline.
                         Ui.relativeTime(record.startedAt(),
+                            Ui.relativeLabel(record.startedAt()),
                             absolute(record.startedAt())))),
                 Ui.meta(
                     Ui.metaItem("Took", Durations.format(record.duration())),

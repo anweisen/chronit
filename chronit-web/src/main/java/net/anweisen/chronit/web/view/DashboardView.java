@@ -165,7 +165,7 @@ public final class DashboardView {
                   : time(attr("datetime", first.startedAt().toString()),
                   attr("data-relative", ""), attr("data-elapsed", ""),
                   attr("title", first.startedAt().toString()),
-                  text(Durations.format(first.elapsed())))),
+                  text(Ui.humanDuration(first.elapsed())))),
           p(cls("overview__sub"),
               text(running.size() == 1
                   ? "elapsed on " + running.getFirst().jobId()
@@ -181,7 +181,10 @@ public final class DashboardView {
                   attr("data-bare", ""),
                   attr("data-hero-next", ""),
                   attr("title", upcoming.nextRun().toString()),
-                  text(upcoming.inText()))),
+                  // Bare: the words around it already say what the number is, so it takes no
+                  // preposition — and the script writes exactly this, with no "in" either.
+                  text(Ui.humanDuration(
+                      Duration.between(Instant.now(), upcoming.nextRun()))))),
           p(cls("overview__sub"), text("until " + upcoming.jobId())));
     } else {
       headline = Node.fragment(
@@ -413,7 +416,7 @@ public final class DashboardView {
       return text(phaseLabel(execution));
     }
     return Node.fragment(text(phaseLabel(execution) + " "),
-        Ui.relativeTime(until, "in " + Durations.format(length)));
+        Ui.relativeTime(until, "in " + Ui.humanDuration(length)));
   }
 
   /**
@@ -521,9 +524,6 @@ public final class DashboardView {
   }
 
   /**
-   * The elapsed clock shown while a job is running, counting up from when it started.
-   */
-  /**
    * The clock a running job counts up on.
    *
    * <p>Rendered for an idle job too, out of sight in the slot beside "Next run", so that a job
@@ -539,7 +539,7 @@ public final class DashboardView {
         attr("data-elapsed", ""),
         attr("data-job-elapsed", ""),
         attr("title", startedAt.toString()),
-        text(Durations.format(elapsed)));
+        text(Ui.humanDuration(elapsed)));
   }
 
   private static Node nextRunTime(Optional<Scheduler.Upcoming> upcoming) {
@@ -551,7 +551,7 @@ public final class DashboardView {
         attr("data-relative", ""),
         attr("data-job-next", ""),
         attr("title", next.nextRun().toString()),
-        text("in " + next.inText()));
+        text(Ui.relativeLabel(next.nextRun().toInstant())));
   }
 
   private static String describeCron(JobConfig job) {
@@ -727,14 +727,14 @@ public final class DashboardView {
                 Ui.fact("Type", microsoft ? "Microsoft" : "Offline"),
                 status != null && status.tokenExpiry() != null
                     ? Ui.fact("Token expires",
-                    Ui.relativeTime(status.tokenExpiry(), status.tokenExpiry().toString()))
+                    Ui.relativeTime(status.tokenExpiry()))
                     : Node.empty(),
                 // The one that decides whether anyone has to sit down at a browser.
                 // Every background refresh pushes it back out to ninety days, so on
                 // a running daemon it should never be seen to fall.
                 status != null && status.sessionExpiry() != null
                     ? Ui.factStrong("Sign-in due",
-                    Ui.relativeTime(status.sessionExpiry(), status.sessionExpiry().toString()))
+                    Ui.relativeTime(status.sessionExpiry()))
                     : Node.empty()),
             p(cls("row__note"), attr("data-account-detail", ""),
                 text(status == null ? "" : status.detail()))));

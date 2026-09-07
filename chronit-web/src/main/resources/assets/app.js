@@ -69,10 +69,16 @@
     ['s', 1],
   ];
 
-  /** "2h 14m" — two units is enough to be useful without being noisy. */
+  /**
+   * "2h 14m" — two units is enough to be useful without being noisy.
+   *
+   * Mirrored by `Ui.humanDuration` on the server, which renders the first paint of every clock on
+   * the page. The two have to agree exactly: whatever this writes a moment after load is what the
+   * server should have written, or every timer on the page visibly changes its mind.
+   */
   function humanDuration(totalSeconds) {
     const seconds = Math.max(0, Math.floor(totalSeconds));
-    if (seconds < 1) return 'now';
+    if (seconds < 1) return '0s';
     const parts = [];
     let rest = seconds;
     for (const [suffix, size] of UNITS) {
@@ -86,11 +92,14 @@
     return parts.join(' ');
   }
 
+  /** "in 2h 14m" / "14m ago". Mirrored by `Ui.relativeLabel`, for the same reason. */
   function relativeLabel(iso) {
     const then = Date.parse(iso);
     if (Number.isNaN(then)) return '';
     const deltaSeconds = (then - Date.now()) / 1000;
-    return deltaSeconds >= 0
+    // The second either side is neither "in" nor "ago": both read as a duration of nothing.
+    if (Math.abs(deltaSeconds) < 1) return 'now';
+    return deltaSeconds > 0
       ? 'in ' + humanDuration(deltaSeconds)
       : humanDuration(-deltaSeconds) + ' ago';
   }

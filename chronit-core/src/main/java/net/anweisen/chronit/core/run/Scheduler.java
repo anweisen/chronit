@@ -2,7 +2,6 @@ package net.anweisen.chronit.core.run;
 
 import net.anweisen.chronit.core.config.ChronitConfig;
 import net.anweisen.chronit.core.config.JobConfig;
-import net.anweisen.chronit.core.util.Durations;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -161,7 +160,6 @@ public final class Scheduler implements AutoCloseable {
         schedule.expression(),
         schedule.zone().getId(),
         schedule.next().orElse(null),
-        schedule.timeUntilNext().map(Durations::format).orElse("never"),
         orchestrator.isRunning(id))));
     // Two jobs that will never fire again compare equal. Returning "after" for both, as this
     // did, is not a valid ordering, and TimSort rejects one outright past 32 elements.
@@ -171,7 +169,7 @@ public final class Scheduler implements AutoCloseable {
   }
 
   public record Upcoming(String jobId, String cron, String timezone,
-                         ZonedDateTime nextRun, String inText, boolean running) {
+                         ZonedDateTime nextRun, boolean running) {
   }
 
   @Override

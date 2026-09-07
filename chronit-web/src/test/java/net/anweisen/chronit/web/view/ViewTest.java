@@ -241,4 +241,66 @@ class ViewTest {
     assertFalse(html.contains("hunter2hunter2"),
         "a password must not survive into the rendered page: " + html);
   }
+
+  // ---------------------------------------------------------------- clocks
+
+  /**
+   * The server draws the first paint of every clock and the script rewrites it a moment later, so
+   * the two formatters have to produce the same words. Anything they disagree about — a missing
+   * space, a third unit, hours where the script counts days — is a visible flicker on load.
+   */
+  @Test
+  void durationsAreWrittenTheWayTheScriptWritesThem() {
+    assertEquals("0s", Ui.humanDuration(Duration.ZERO));
+    assertEquals("0s", Ui.humanDuration(Duration.ofMillis(400)));
+    assertEquals("0s", Ui.humanDuration(Duration.ofSeconds(-30)));
+    assertEquals("45s", Ui.humanDuration(Duration.ofSeconds(45)));
+    assertEquals("2m 30s", Ui.humanDuration(Duration.ofSeconds(150)));
+    assertEquals("21h 6m", Ui.humanDuration(Duration.ofMinutes(21 * 60 + 6).plusSeconds(30)));
+    // Two units and no more, and the second one is whichever comes next — not the next in line.
+    assertEquals("3d 2h", Ui.humanDuration(Duration.ofHours(74).plusMinutes(15)));
+    assertEquals("1d 30s", Ui.humanDuration(Duration.ofDays(1).plusSeconds(30)));
+  }
+
+  @Test
+  void instantsAreLabelledTheWayTheScriptLabelsThem() {
+    // Offsets that are half a minute off a unit boundary, so the seconds this test takes to run
+    // cannot move the label: both formatters floor, and only the two leading units are shown.
+    Instant now = Instant.now();
+    Duration off = Duration.ofHours(3).plusMinutes(30).plusSeconds(30);
+    assertEquals("now", Ui.relativeLabel(now));
+    assertEquals("in 3h 30m", Ui.relativeLabel(now.plus(off)));
+    assertEquals("3h 30m ago", Ui.relativeLabel(now.minus(off)));
+  }
+
+  /**
+   * The run history is one of the clocks: the server used to write "12 Aug, 20:00" into it and the
+   * script replaced that with "3d ago" on load.
+   */
+  @Test
+  void theRunHistoryIsAlreadyRelativeWhenItArrives() {
+    String html = RunsView.render(List.of(runWith("ok")));
+
+    assertTrue(html.contains("ago</time>"), html);
+    // The date itself is not lost, it moves to the tooltip.
+    assertTrue(html.contains("Aug"), html);
+  }
+
+  /** The mirrored formatter in app.js, pinned to the Java one above. */
+  @Test
+  void theScriptStillAgreesOnTheUnits() throws Exception {
+    String script;
+    try (var in = Ui.class.getResourceAsStream("/assets/app.js")) {
+      script = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    assertTrue(script.contains("['d', 86400]"), "unit table changed in app.js");
+    assertTrue(script.contains("['h', 3600]"), "unit table changed in app.js");
+    assertTrue(script.contains("['m', 60]"), "unit table changed in app.js");
+    assertTrue(script.contains("['s', 1]"), "unit table changed in app.js");
+    assertTrue(script.contains("parts.join(' ')"), "unit separator changed in app.js");
+    assertTrue(script.contains("if (seconds < 1) return '0s';"), "zero case changed in app.js");
+    assertTrue(script.contains("if (Math.abs(deltaSeconds) < 1) return 'now';"),
+        "the band around now changed in app.js");
+  }
 }

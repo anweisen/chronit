@@ -5,6 +5,7 @@ import net.anweisen.chronit.core.state.VisitStatus;
 import net.anweisen.chronit.web.html.Element;
 import net.anweisen.chronit.web.html.Node;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 
@@ -303,19 +304,88 @@ public final class Ui {
 
   // ---------------------------------------------------------------- time
 
+  private static final long[] UNIT_SECONDS = {86400, 3600, 60, 1};
+  private static final String[] UNIT_SUFFIX = {"d", "h", "m", "s"};
+
+  /**
+   * A length of time, in the words the script uses: {@code "2h 14m"}.
+   *
+   * <p>Two units is enough to be useful without being noisy. This is a mirror of
+   * {@code humanDuration} in {@code app.js} and has to stay one: the server draws the first paint
+   * and the script rewrites it a moment later, so any disagreement between them — a missing space,
+   * a third unit, hours where the script says days — is visible as a flicker on every load. It is
+   * deliberately not {@code Durations.format}, which writes the compact form configuration and the
+   * logs are in ({@code 1h30m}) and never elides.
+   */
+  public static String humanDuration(Duration duration) {
+    long seconds = duration == null ? 0 : Math.max(0, duration.getSeconds());
+    if (seconds < 1) {
+      return "0s";
+    }
+    StringBuilder out = new StringBuilder();
+    long rest = seconds;
+    int written = 0;
+    for (int unit = 0; unit < UNIT_SECONDS.length && written < 2; unit++) {
+      long amount = rest / UNIT_SECONDS[unit];
+      if (amount > 0) {
+        if (written > 0) {
+          out.append(' ');
+        }
+        out.append(amount).append(UNIT_SUFFIX[unit]);
+        rest -= amount * UNIT_SECONDS[unit];
+        written++;
+      }
+    }
+    return out.toString();
+  }
+
+  /**
+   * How far off an instant is, in the words the script uses: {@code "in 2h 14m"}, {@code "14m
+   * ago"}, {@code "now"} for the second either side of it. The mirror of {@code relativeLabel}
+   * in {@code app.js}, for the same reason as {@link #humanDuration}.
+   */
+  public static String relativeLabel(Instant instant) {
+    Duration delta = Duration.between(Instant.now(), instant);
+    // abs() before the seconds, not after: getSeconds() floors, so a moment four milliseconds
+    // past reads as -1 second and would come out "0s ago" where the script says "now".
+    if (delta.abs().getSeconds() < 1) {
+      return "now";
+    }
+    return delta.isNegative()
+        ? humanDuration(delta.negated()) + " ago"
+        : "in " + humanDuration(delta);
+  }
+
   /**
    * A timestamp the browser keeps current.
    *
    * <p>The machine-readable instant goes in the attribute and the script rewrites the label every
    * second, so "in 21h 6m" stays true without the page asking the server anything.
+   *
+   * <p>The label rendered here is the one the script would write for the same instant, so the
+   * first paint is already what the page settles on. Pass a {@code fallback} only where it cannot
+   * be — a countdown whose text has to stand still while the deadline it counts to does.
    */
+  public static Element relativeTime(Instant instant) {
+    return relativeTime(instant, instant == null ? "never" : relativeLabel(instant));
+  }
+
+  public static Element relativeTime(ZonedDateTime moment) {
+    return relativeTime(moment == null ? null : moment.toInstant());
+  }
+
   public static Element relativeTime(Instant instant, String fallback) {
+    return relativeTime(instant, fallback, instant == null ? null : instant.toString());
+  }
+
+  /** The same, where the moment itself is worth spelling out in words on hover. */
+  public static Element relativeTime(Instant instant, String fallback, String title) {
     if (instant == null) {
       return time(text(fallback));
     }
     return time(attr("datetime", instant.toString()),
         attr("data-relative", ""),
-        attr("title", instant.toString()),
+        attr("title", title),
         text(fallback));
   }
 
