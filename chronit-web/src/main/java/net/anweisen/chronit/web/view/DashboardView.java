@@ -154,22 +154,29 @@ public final class DashboardView {
 
     Node headline;
     if (!running.isEmpty()) {
-      JobExecution first = model.runningJobs().get(running.getFirst().jobId());
+      // The hero is one clock for the whole daemon, so it counts the run that has been going
+      // longest. It cannot take the first of the list: `upcoming` is sorted by each job's *next*
+      // fire time, which says nothing about how long the current run has lasted, so with two jobs
+      // running the headline reported whichever fires again soonest — a job that started seconds
+      // ago while another had been on a server for an hour. The sentence underneath names the job
+      // the number belongs to, for the same reason.
+      Scheduler.Upcoming longest = longestRunning(model, running);
+      JobExecution first = model.runningJobs().get(longest.jobId());
       headline = Node.fragment(
           p(cls("overview__eyebrow is-live"),
               span(cls("overview__beacon"), attr("aria-hidden", "true")),
               text(running.size() == 1 ? "Running now" : running.size() + " running now")),
           h1(cls("overview__value"),
               first == null
-                  ? text(running.getFirst().jobId())
+                  ? text(longest.jobId())
                   : time(attr("datetime", first.startedAt().toString()),
                   attr("data-relative", ""), attr("data-elapsed", ""),
                   attr("title", first.startedAt().toString()),
                   text(Ui.humanDuration(first.elapsed())))),
           p(cls("overview__sub"),
               text(running.size() == 1
-                  ? "elapsed on " + running.getFirst().jobId()
-                  : "elapsed on " + running.getFirst().jobId() + ", and "
+                  ? "elapsed on " + longest.jobId()
+                  : "elapsed on " + longest.jobId() + ", and "
                   + count(running.size() - 1, "other job"))));
     } else if (next.isPresent()) {
       Scheduler.Upcoming upcoming = next.get();
@@ -211,6 +218,29 @@ public final class DashboardView {
    */
   private static String count(int amount, String noun) {
     return amount + " " + noun + (amount == 1 ? "" : "s");
+  }
+
+  /**
+   * Of the jobs running right now, the one that started earliest.
+   *
+   * <p>A job can be listed as running a moment before its execution is registered, so a missing
+   * one is skipped rather than treated as having started at the epoch; if none of them has an
+   * execution yet there is nothing to compare and the first is as good as any.
+   */
+  private static Scheduler.Upcoming longestRunning(Model model, List<Scheduler.Upcoming> running) {
+    Scheduler.Upcoming longest = null;
+    Instant earliest = null;
+    for (Scheduler.Upcoming job : running) {
+      JobExecution execution = model.runningJobs().get(job.jobId());
+      if (execution == null) {
+        continue;
+      }
+      if (earliest == null || execution.startedAt().isBefore(earliest)) {
+        earliest = execution.startedAt();
+        longest = job;
+      }
+    }
+    return longest == null ? running.getFirst() : longest;
   }
 
   /**
