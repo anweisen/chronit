@@ -4,19 +4,19 @@
 # Nothing outside chronit-driver-mcpl needs to change.
 
 [versions]
-minecraft = "26.2"
+minecraft = "26.3"
 
 # MCProtocolLib publishes only snapshots. Pinned to an exact timestamped build so the same commit
-# always resolves the same bytes — plain `26.2-SNAPSHOT` would silently pick up whatever was
+# always resolves the same bytes — plain `26.3-SNAPSHOT` would silently pick up whatever was
 # published most recently.
-mcpl = "26.2-20260809.160751-16"
+mcpl = "26.3-20261010.002735-10"
 
 # The adventure release MCProtocolLib compiles against. Only the plain-text serializer is added
 # here; the rest arrives transitively.
 adventure = "5.2.0"
 
 minecraftauth = "5.0.2"
-viaversion = "5.11.0"
+viaversion = "5.12.1"
 vialoader = "3.0.4"
 
 jackson = "2.22.1"

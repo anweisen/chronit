@@ -543,7 +543,8 @@ final class McplSession implements ClientHandle {
     yaw = relative.contains(PositionElement.Y_ROT) ? yaw + packet.getYRot() : packet.getYRot();
     pitch = relative.contains(PositionElement.X_ROT) ? pitch + packet.getXRot() : packet.getXRot();
 
-    session.send(new ServerboundAcceptTeleportationPacket(packet.getId()));
+    // Since 26.3 the confirmation carries the position the client ended up at.
+    session.send(new ServerboundAcceptTeleportationPacket(packet.getId(), x, y, z, yaw, pitch));
     session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, yaw, pitch));
 
     if (!teleportConfirmed) {

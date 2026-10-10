@@ -124,7 +124,7 @@ servers:
     # auto  — connect natively first and only fall back to translation if the version is refused.
     #         Correct for the great majority of servers, including those running ViaVersion
     #         server-side, which accept far newer clients than they advertise.
-    # 776   — force a specific protocol number.
+    # 777   — force a specific protocol number.
     # 1.20.4 — force a named version. Needs the ViaVersion module (the -via image).
     protocol: auto
 

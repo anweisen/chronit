@@ -20,7 +20,7 @@ that module honestly and the configuration cache stays usable.
 
 ```
 chronit-core/          configuration, scheduling, orchestration, the driver interface
-chronit-driver-mcpl/   the Minecraft 26.2 implementation, the only version-aware module
+chronit-driver-mcpl/   the Minecraft 26.3 implementation, the only version-aware module
 chronit-via/           optional ViaVersion translation, found via ServiceLoader
 chronit-web/           optional status and login interface
 chronit-app/           command line and executable jar

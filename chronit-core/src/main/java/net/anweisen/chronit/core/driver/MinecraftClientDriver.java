@@ -15,10 +15,10 @@ import java.time.Duration;
  */
 public interface MinecraftClientDriver {
 
-  /** Stable identifier for logs, e.g. {@code mcpl-26.2}. */
+  /** Stable identifier for logs, e.g. {@code mcpl-26.3}. */
   String id();
 
-  /** The Minecraft version this driver natively speaks, e.g. {@code 26.2}. */
+  /** The Minecraft version this driver natively speaks, e.g. {@code 26.3}. */
   String nativeVersionName();
 
   /** The protocol number this driver natively speaks. */

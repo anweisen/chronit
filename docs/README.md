@@ -6,7 +6,7 @@
 | [Configuring a visit](configuration.md) | Resource packs, readiness, command sequences, menu clicks, secrets |
 | [Scheduling and outcomes](scheduling.md) | Daemon or external cron, stopping a run, what the five outcomes mean |
 | [Accounts and tokens](accounts.md) | Device code login, why you rarely log in twice, offline accounts |
-| [Minecraft versions](versions.md) | Protocol 776, `protocol: auto`, ViaVersion, retargeting the driver |
+| [Minecraft versions](versions.md) | Protocol 777, `protocol: auto`, ViaVersion, retargeting the driver |
 | [Web interface](web-interface.md) | The dashboard, its design, and how it is built |
 | [Development](development.md) | Building, testing, module layout |
 

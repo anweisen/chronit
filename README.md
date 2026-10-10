@@ -4,7 +4,7 @@ Logs a Minecraft account into a list of Java Edition servers on a schedule, wait
 properly in the world, runs a configured sequence of commands, stays for a set time, then moves on
 to the next server.
 
-Built for **Minecraft 26.2 (protocol 776)**. Older versions are reachable through an optional
+Built for **Minecraft 26.3 (protocol 777)**. Older versions are reachable through an optional
 translation layer.
 
 ![The chronit dashboard, showing the next run and two scheduled jobs](docs/images/dashboard-home.png)
@@ -92,7 +92,7 @@ succeeded. Both paths run the same code; see [Scheduling and outcomes](docs/sche
   around to defeat AFK kicks, so a server that kicks idle players will kick it.
 - Signed chat is best effort. Commands are unaffected, but if a server rejects signed plain chat,
   set `secureChat: OFF` and use commands instead.
-- The ViaVersion path has no automated tests. The tests exercise the native 26.2 path against an
+- The ViaVersion path has no automated tests. The tests exercise the native 26.3 path against an
   in-process server. The integration follows the documented ViaLoader API but has not been run
   against a real legacy server here.
 - One account can only be on one server at a time. Logging in again invalidates the earlier session,

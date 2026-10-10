@@ -1,6 +1,6 @@
 # Minecraft versions
 
-The client speaks one protocol version natively: 26.2. That comes from the protocol library, which
+The client speaks one protocol version natively: 26.3. That comes from the protocol library, which
 ships a single packet codec whose packet classes encode that version's field layouts, so remapping
 packet ids alone could not reach another version.
 
@@ -28,12 +28,12 @@ docker compose -f docker/docker-compose.yml build --build-arg VIA=true
 ./gradlew -Pvia build
 ```
 
-That enables `protocol: 1.20.4` and numeric protocol ids other than 776, and gives `auto` something
+That enables `protocol: 1.20.4` and numeric protocol ids other than 777, and gives `auto` something
 to fall back to. Without it, those configurations fail with a message telling you so instead of
 failing obscurely at connect time.
 
 The module really is optional. `chronit-core` has no compile-time reference to it and finds it
-through `ServiceLoader`, so deleting `chronit-via/` leaves a working 26.2-only application.
+through `ServiceLoader`, so deleting `chronit-via/` leaves a working 26.3-only application.
 
 ## Targeting a different version natively
 
@@ -41,8 +41,8 @@ Change two entries in `gradle/libs.versions.toml` and rebuild:
 
 ```toml
 [versions]
-minecraft = "26.2"
-mcpl = "26.2-20260809.160751-16"
+minecraft = "26.3"
+mcpl = "26.3-20261010.002735-10"
 ```
 
 Nothing outside `chronit-driver-mcpl` needs to change. Everything version-specific sits behind the

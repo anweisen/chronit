@@ -29,7 +29,7 @@ public sealed interface ProtocolSpec {
   /**
    * Parses the configured value.
    *
-   * @param raw {@code null} or {@code "auto"}, a protocol number such as {@code "776"}, or a
+   * @param raw {@code null} or {@code "auto"}, a protocol number such as {@code "777"}, or a
    *            version name such as {@code "1.20.4"}
    */
   static ProtocolSpec parse(String raw) {
