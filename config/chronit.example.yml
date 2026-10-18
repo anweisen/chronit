@@ -78,7 +78,7 @@ defaults:
 
   # When the client counts as "in the world" and commands may start.
   readyWhen:
-    spawn: true               # the join packet plus a confirmed initial teleport
+    spawn: true               # the join packet, a confirmed initial teleport, and alive
     settle: 2s                # extra pause once the conditions hold
     timeout: 60s
 

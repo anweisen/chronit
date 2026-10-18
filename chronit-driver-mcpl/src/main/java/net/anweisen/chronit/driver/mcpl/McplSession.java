@@ -22,6 +22,7 @@ import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
 import org.geysermc.mcprotocollib.network.packet.Packet;
 import org.geysermc.mcprotocollib.network.session.ClientNetworkSession;
+import org.geysermc.mcprotocollib.protocol.data.game.ClientCommand;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PositionElement;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction;
@@ -46,6 +47,7 @@ import org.geysermc.mcprotocollib.protocol.packet.cookie.serverbound.Serverbound
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundDisguisedChatPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundRespawnPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundStartConfigurationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerClosePacket;
@@ -53,16 +55,17 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.C
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetSlotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundOpenScreenPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchFinishedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchStartPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientCommandPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundPlayerLoadedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundChunkBatchReceivedPacket;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerStatusOnlyPacket;
 import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundLoginFinishedPacket;
 import org.slf4j.Logger;
@@ -123,6 +126,9 @@ final class McplSession implements ClientHandle {
    */
   private static final Duration CONTENTS_GRACE = Duration.ofSeconds(1);
 
+  /** Roughly how long a player looks at the death screen before pressing Respawn. */
+  private static final Duration RESPAWN_DELAY = Duration.ofMillis(1500);
+
   /** The server clamps the requested chunk rate to this range. */
   private static final float MIN_CHUNKS_PER_TICK = 0.01f;
   private static final float MAX_CHUNKS_PER_TICK = 64.0f;
@@ -151,6 +157,16 @@ final class McplSession implements ClientHandle {
   private volatile boolean gotJoinPacket;
   private volatile boolean teleportConfirmed;
   private volatile boolean chatMatched;
+  /** Every server sends health on the player's first tick, which is the only way to learn it is dead. */
+  private volatile boolean healthKnown;
+  /** The server reported zero health: on the death screen, including after joining dead. */
+  private volatile boolean dead;
+  private final AtomicBoolean respawnRequested = new AtomicBoolean();
+  /**
+   * A respawn packet arrived and the teleport placing us has not yet: readiness waits for the
+   * position, and the server for a fresh "loaded" report once it is confirmed.
+   */
+  private volatile boolean reloadPending;
   private volatile int entityId = -1;
   private volatile String dimension = "unknown";
   private volatile String closeReason;
@@ -528,7 +544,14 @@ final class McplSession implements ClientHandle {
   }
 
   /**
-   * Confirms a teleport and echoes the resulting position.
+   * Confirms a teleport, reporting the resulting position in the confirmation.
+   *
+   * <p>Since 26.3 the server applies that position as the client's movement for the tick, and a
+   * vanilla client sends nothing else. Echoing it with a move packet as older clients did is not
+   * harmless: the server kicks with {@code invalid_player_movement} once two position updates
+   * arrive without a tick end between them, which two teleports in quick succession (a hub moving
+   * a joining player to spawn) produce before the tick loop runs. Older servers reached through
+   * ViaVersion still get the move packet, which Via adds when it translates the confirmation.
    *
    * <p>The first confirmed teleport is the dependable signal that the server considers us
    * present: it arrives after the world is prepared, whereas entering the play state only means
@@ -543,16 +566,61 @@ final class McplSession implements ClientHandle {
     yaw = relative.contains(PositionElement.Y_ROT) ? yaw + packet.getYRot() : packet.getYRot();
     pitch = relative.contains(PositionElement.X_ROT) ? pitch + packet.getXRot() : packet.getXRot();
 
-    // Since 26.3 the confirmation carries the position the client ended up at.
     session.send(new ServerboundAcceptTeleportationPacket(packet.getId(), x, y, z, yaw, pitch));
-    session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, yaw, pitch));
 
-    if (!teleportConfirmed) {
-      teleportConfirmed = true;
-      log.debug("Confirmed initial teleport to {}, {}, {}",
-          Math.round(x), Math.round(y), Math.round(z));
+    // Every one is logged: a server that keeps re-sending the same teleport is not accepting the
+    // confirmation, which shows up here and nowhere else.
+    log.debug("Confirmed {}teleport {} to {}, {}, {}", teleportConfirmed ? "" : "initial ",
+        packet.getId(), Math.round(x), Math.round(y), Math.round(z));
+    teleportConfirmed = true;
+
+    // After a respawn the server restarts its wait for the client to finish loading. The
+    // initial report belongs to readiness, so this only covers the ones after it.
+    boolean respawned = reloadPending;
+    reloadPending = false;
+    if (respawned && readyLatch.get()) {
+      session.send(ServerboundPlayerLoadedPacket.INSTANCE);
     }
     evaluateReadiness();
+  }
+
+  /**
+   * Presses Respawn on the death screen, as a player would.
+   *
+   * <p>Without it a dead bot stays dead for the rest of the visit, and on Paper every command it
+   * sends is refused with {@code chat.disabled.options}. Health arrives as zero both on dying and
+   * on joining a server where the player was saved dead.
+   */
+  private void onHealth(float health) {
+    healthKnown = true;
+    if (health > 0) {
+      if (dead) {
+        dead = false;
+        respawnRequested.set(false);
+      }
+      evaluateReadiness();
+      return;
+    }
+    dead = true;
+    if (!respawnRequested.compareAndSet(false, true)) {
+      return;
+    }
+    Duration delay = settings.jitter().apply(RESPAWN_DELAY);
+    log.info("Died at {}, {}, {}; respawning in {}",
+        Math.round(x), Math.round(y), Math.round(z), Durations.format(delay));
+    scheduler.schedule(() -> {
+      if (dead && !closing.get() && session.isConnected()) {
+        session.send(new ServerboundClientCommandPacket(ClientCommand.PERFORM_RESPAWN));
+      }
+    }, delay.toMillis(), TimeUnit.MILLISECONDS);
+  }
+
+  private void onRespawn(ClientboundRespawnPacket packet) {
+    dimension = packet.getCommonPlayerSpawnInfo() != null
+        ? String.valueOf(packet.getCommonPlayerSpawnInfo().getWorldName())
+        : dimension;
+    reloadPending = true;
+    log.debug("Respawned in {}", dimension);
   }
 
   /**
@@ -592,7 +660,11 @@ final class McplSession implements ClientHandle {
     }
     ReadyWhenConfig when = settings.readyWhen();
 
-    if (Boolean.TRUE.equals(when.spawn()) && !(gotJoinPacket && teleportConfirmed)) {
+    // Spawned means alive as well as placed: a player saved dead joins onto the death screen,
+    // and Paper refuses a dead player's commands outright. Health arrives on the first tick,
+    // just after the initial teleport, so it is waited for rather than assumed.
+    boolean spawned = gotJoinPacket && teleportConfirmed && healthKnown && !dead && !reloadPending;
+    if (Boolean.TRUE.equals(when.spawn()) && !spawned) {
       return;
     }
     if (when.minChunks() != null && chunksReceived.get() < when.minChunks()) {
@@ -817,6 +889,8 @@ final class McplSession implements ClientHandle {
         case ClientboundLoginPacket join -> onJoin(join);
         case ClientboundStartConfigurationPacket ignored -> setPhase(Phase.CONFIGURATION);
         case ClientboundPlayerPositionPacket position -> onTeleport(position);
+        case ClientboundSetHealthPacket health -> onHealth(health.getHealth());
+        case ClientboundRespawnPacket respawn -> onRespawn(respawn);
         case ClientboundChunkBatchStartPacket ignored -> batchStartedAtNanos = System.nanoTime();
         case ClientboundChunkBatchFinishedPacket finished -> onChunkBatchFinished(finished);
         case ClientboundLevelChunkWithLightPacket ignored -> {
@@ -836,7 +910,11 @@ final class McplSession implements ClientHandle {
             Components.plain(system.getContent()),
             Components.json(system.getContent())));
         case ClientboundPlayerChatPacket player -> {
-          chat.onSignedMessageReceived();
+          // The server only tracks signed messages, so acknowledging an unsigned one claims a
+          // message it never counted, and it disconnects over a chat validation failure.
+          if (player.getMessageSignature() != null) {
+            chat.onSignedMessageReceived();
+          }
           String text = player.getUnsignedContent() != null
               ? Components.plain(player.getUnsignedContent())
               : player.getContent();

@@ -15,17 +15,22 @@ import net.anweisen.chronit.core.driver.ResourcePackEvent;
 import net.anweisen.chronit.core.driver.ServerTarget;
 import net.anweisen.chronit.core.driver.SessionSettings;
 import net.anweisen.chronit.core.util.Jitter;
+import org.geysermc.mcprotocollib.protocol.data.game.ClientCommand;
 import org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus;
 import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundClientInformationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundCustomPayloadPacket;
 import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundResourcePackPacket;
 import org.geysermc.mcprotocollib.protocol.packet.configuration.serverbound.ServerboundAcceptCodeOfConductPacket;
 import org.geysermc.mcprotocollib.protocol.packet.cookie.serverbound.ServerboundCookieResponsePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatAckPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientCommandPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundPlayerLoadedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundChunkBatchReceivedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -151,9 +156,16 @@ class JoinSequenceTest {
         assertFalse(server.packets(ServerboundCustomPayloadPacket.class).isEmpty(),
             "the brand must be sent");
 
-        assertEquals(1, server.packets(ServerboundAcceptTeleportationPacket.class).size(),
-            "the initial teleport must be confirmed");
-        assertEquals(42, server.packets(ServerboundAcceptTeleportationPacket.class).getFirst().getId());
+        List<ServerboundAcceptTeleportationPacket> accepted = server.packets(ServerboundAcceptTeleportationPacket.class);
+        assertEquals(List.of(42, 43), accepted.stream().map(ServerboundAcceptTeleportationPacket::getId).toList(),
+            "every teleport must be confirmed");
+        assertEquals(70.0d, accepted.getLast().getY(), "since 26.3 the confirmation carries the position");
+
+        // A 26.3 server kicks with invalid_player_movement when two position updates arrive within
+        // one client tick, and applies the confirmation as the position update itself.
+        assertTrue(server.packets(ServerboundMovePlayerPosPacket.class).isEmpty()
+            && server.packets(ServerboundMovePlayerPosRotPacket.class).isEmpty(),
+            "a teleport must not be echoed with a move packet");
 
         assertEquals(1, server.packets(ServerboundChunkBatchReceivedPacket.class).size(),
             "chunk batches must be acknowledged or the server throttles chunk delivery");
@@ -302,6 +314,86 @@ class JoinSequenceTest {
             "the leading slash is not part of the wire format");
       }
     }
+  }
+
+  @Test
+  void neverAcknowledgesUnsignedPlayerChat() throws Exception {
+    try (FakeMinecraftServer server = new FakeMinecraftServer(FakeMinecraftServer.Options.bare()).start()) {
+      Recorder recorder = new Recorder();
+      SessionSettings settings = settings(ResourcePackConfig.Mode.FAKE,
+          new ReadyWhenConfig(true, 0, null, Duration.ZERO, Duration.ofSeconds(20)));
+
+      try (ClientHandle client = connect(server, settings, recorder)) {
+        client.whenReady().get(20, TimeUnit.SECONDS);
+        // More than one acknowledgement batch, so a miscount would be flushed mid-session.
+        for (int i = 0; i < 25; i++) {
+          server.unsignedPlayerChat("message " + i);
+        }
+        for (int i = 0; i < 50 && recorder.chat.size() < 25; i++) {
+          Thread.sleep(100);
+        }
+        assertEquals(25, recorder.chat.size());
+        client.disconnect("done");
+      }
+      // The flush rides out just before the disconnect; give it time to land.
+      Thread.sleep(500);
+
+      // The server tracks only signed messages; acknowledging these fails chat validation.
+      assertTrue(server.packets(ServerboundChatAckPacket.class).isEmpty());
+    }
+  }
+
+  @Test
+  void respawnsWhenJoiningDeadBeforeReportingReady() throws Exception {
+    try (FakeMinecraftServer server = new FakeMinecraftServer(FakeMinecraftServer.Options.bare()).startDead().start()) {
+      Recorder recorder = new Recorder();
+      SessionSettings settings = settings(ResourcePackConfig.Mode.FAKE,
+          new ReadyWhenConfig(true, 0, null, Duration.ZERO, Duration.ofSeconds(20)));
+
+      try (ClientHandle client = connect(server, settings, recorder)) {
+        client.whenReady().get(20, TimeUnit.SECONDS);
+
+        // Readiness waits for the respawn: a dead player's commands are refused on Paper.
+        assertEquals(1, respawnRequests(server), "a player saved dead must press Respawn");
+        for (int i = 0; i < 50 && server.packets(ServerboundPlayerLoadedPacket.class).isEmpty(); i++) {
+          Thread.sleep(100);
+        }
+        Thread.sleep(300);
+        assertEquals(1, server.packets(ServerboundPlayerLoadedPacket.class).size(),
+            "loading is reported once, after the respawn rather than before and after it");
+      }
+    }
+  }
+
+  @Test
+  void respawnsOnceAfterDyingInTheWorld() throws Exception {
+    try (FakeMinecraftServer server = new FakeMinecraftServer(FakeMinecraftServer.Options.bare()).start()) {
+      Recorder recorder = new Recorder();
+      SessionSettings settings = settings(ResourcePackConfig.Mode.FAKE,
+          new ReadyWhenConfig(true, 0, null, Duration.ZERO, Duration.ofSeconds(20)));
+
+      try (ClientHandle client = connect(server, settings, recorder)) {
+        client.whenReady().get(20, TimeUnit.SECONDS);
+        assertEquals(0, respawnRequests(server));
+
+        // Two health updates for one death, as a server sends when damage lands twice.
+        server.kill();
+        server.kill();
+        for (int i = 0; i < 100 && server.packets(ServerboundPlayerLoadedPacket.class).size() < 2; i++) {
+          Thread.sleep(100);
+        }
+
+        assertEquals(1, respawnRequests(server), "one death, one press of Respawn");
+        // The server waits for the client to finish loading again after a respawn.
+        assertEquals(2, server.packets(ServerboundPlayerLoadedPacket.class).size());
+      }
+    }
+  }
+
+  private static long respawnRequests(FakeMinecraftServer server) {
+    return server.packets(ServerboundClientCommandPacket.class).stream()
+        .filter(command -> command.getRequest() == ClientCommand.PERFORM_RESPAWN)
+        .count();
   }
 
   @Test

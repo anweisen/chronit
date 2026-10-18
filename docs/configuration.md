@@ -30,7 +30,7 @@ players in a lobby or an authentication world first. So the readiness gate is ex
 
 ```yaml
 readyWhen:
-  spawn: true                    # join packet + confirmed initial teleport (default)
+  spawn: true                    # join packet + confirmed initial teleport + alive (default)
   minChunks: 0
   chat: "(?i)welcome to"         # for servers that announce the handover
   settle: 2s

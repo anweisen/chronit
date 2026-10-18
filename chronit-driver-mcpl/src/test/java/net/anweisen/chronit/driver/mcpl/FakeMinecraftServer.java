@@ -4,6 +4,7 @@ import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import org.geysermc.mcprotocollib.auth.GameProfile;
 import org.geysermc.mcprotocollib.network.Session;
+import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
 import org.geysermc.mcprotocollib.network.packet.Packet;
 import org.geysermc.mcprotocollib.network.server.NetworkServer;
@@ -11,6 +12,9 @@ import org.geysermc.mcprotocollib.protocol.MinecraftConstants;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftCodec;
 import org.geysermc.mcprotocollib.protocol.data.ProtocolState;
+import org.geysermc.mcprotocollib.protocol.data.game.ClientCommand;
+import org.geysermc.mcprotocollib.protocol.data.game.Holder;
+import org.geysermc.mcprotocollib.protocol.data.game.chat.ChatFilterType;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerSpawnInfo;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerType;
@@ -23,6 +27,8 @@ import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.Clie
 import org.geysermc.mcprotocollib.protocol.packet.configuration.serverbound.ServerboundFinishConfigurationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.cookie.clientbound.ClientboundCookieRequestPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundRespawnPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerClosePacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetContentPacket;
@@ -30,16 +36,21 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.C
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchFinishedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchStartPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientCommandPacket;
 import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundLoginFinishedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundHelloPacket;
 import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundLoginAcknowledgedPacket;
 
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A scripted Minecraft server used to test the client end to end without a real server.
@@ -66,6 +77,10 @@ final class FakeMinecraftServer implements AutoCloseable {
 
   /** When set, this command triggers a menu — the way a plugin responds to /rewards. */
   private volatile MenuTrigger menuTrigger;
+  private volatile boolean joinDead;
+  private volatile long lastCommandNanos;
+  private volatile long disconnectedNanos;
+  private final AtomicInteger teleportIds = new AtomicInteger(100);
 
   private record MenuTrigger(String command, int containerId, String title,
                              int containerSlots, int stateId) {
@@ -182,11 +197,52 @@ final class FakeMinecraftServer implements AutoCloseable {
     }
   }
 
+  /**
+   * How long the client stayed after its last command before the connection closed, or null
+   * while it is still open.
+   */
+  Duration quietBeforeDisconnect() {
+    long closedAt = disconnectedNanos;
+    return closedAt == 0 ? null : Duration.ofNanos(closedAt - lastCommandNanos);
+  }
+
+  /** Makes the player join as if it had been saved dead. Call before {@link #start()}. */
+  FakeMinecraftServer startDead() {
+    this.joinDead = true;
+    return this;
+  }
+
+  /** Kills the player where it stands. */
+  void kill() {
+    Session session = clientSession;
+    if (session != null && session.isConnected()) {
+      session.send(new ClientboundSetHealthPacket(0f, 20, 5f));
+    }
+  }
+
+  private static PlayerSpawnInfo spawnInfo() {
+    return new PlayerSpawnInfo(0, Key.key("minecraft", "overworld"), 0L,
+        GameMode.SURVIVAL, null, false, false, null, 0, 63);
+  }
+
   /** Sends a system chat message, for exercising waitFor and readiness patterns. */
   void say(String message) {
     Session session = clientSession;
     if (session != null && session.isConnected()) {
       session.send(new ClientboundSystemChatPacket(Component.text(message), false));
+    }
+  }
+
+  /**
+   * Relays player chat without a signature, as a server without enforce-secure-profile does for
+   * a player who has no chat session.
+   */
+  void unsignedPlayerChat(String message) {
+    Session session = clientSession;
+    if (session != null && session.isConnected()) {
+      session.send(new ClientboundPlayerChatPacket(0, UUID.randomUUID(), 0, null, message,
+          System.currentTimeMillis(), 0L, List.of(), null, ChatFilterType.PASS_THROUGH,
+          Holder.ofId(0), Component.text("Someone"), null));
     }
   }
 
@@ -215,8 +271,16 @@ final class FakeMinecraftServer implements AutoCloseable {
   private final class Script extends SessionAdapter {
 
     @Override
+    public void disconnected(DisconnectedEvent event) {
+      disconnectedNanos = System.nanoTime();
+    }
+
+    @Override
     public void packetReceived(Session session, Packet packet) {
       received.add(packet);
+      if (packet instanceof ServerboundChatCommandPacket) {
+        lastCommandNanos = System.nanoTime();
+      }
       MinecraftProtocol protocol = session.getPacketProtocol();
 
       if (packet instanceof ClientIntentionPacket intention) {
@@ -245,11 +309,20 @@ final class FakeMinecraftServer implements AutoCloseable {
 
       MenuTrigger trigger = menuTrigger;
       if (trigger != null
-          && packet instanceof org.geysermc.mcprotocollib.protocol.packet.ingame
-          .serverbound.ServerboundChatCommandPacket command
+          && packet instanceof ServerboundChatCommandPacket command
           && command.getCommand().equals(trigger.command())) {
         openMenu(trigger.containerId(), trigger.title(),
             trigger.containerSlots(), trigger.stateId());
+        return;
+      }
+
+      if (packet instanceof ServerboundClientCommandPacket command
+          && command.getRequest() == ClientCommand.PERFORM_RESPAWN) {
+        // What a vanilla server sends a respawning player: a fresh world, full health, a position.
+        session.send(new ClientboundRespawnPacket(spawnInfo(), false, false));
+        session.send(new ClientboundSetHealthPacket(20f, 20, 5f));
+        session.send(new ClientboundPlayerPositionPacket(teleportIds.getAndIncrement(),
+            8.5d, 64.0d, 8.5d, 0, 0, 0, 0f, 0f));
         return;
       }
 
@@ -290,13 +363,16 @@ final class FakeMinecraftServer implements AutoCloseable {
           false,
           true,
           false,
-          new PlayerSpawnInfo(0, Key.key("minecraft", "overworld"), 0L,
-              GameMode.SURVIVAL, null, false, false, null, 0, 63),
+          spawnInfo(),
           false,
           false));
 
-      // The initial teleport: the client must confirm it before it counts as in the world.
+      // The initial teleport: the client must confirm it before it counts as in the world. Hubs
+      // commonly move a joining player to spawn straight away, so a second one follows at once.
       session.send(new ClientboundPlayerPositionPacket(42, 8.5d, 64.0d, 8.5d, 0, 0, 0, 0f, 0f));
+      session.send(new ClientboundPlayerPositionPacket(43, 0.5d, 70.0d, 0.5d, 0, 0, 0, 90f, 0f));
+      // Health follows on the first tick; a player saved dead learns it from this.
+      session.send(new ClientboundSetHealthPacket(joinDead ? 0f : 20f, 20, 5f));
 
       if (options.sendChunkBatch()) {
         session.send(new ClientboundChunkBatchStartPacket());

@@ -47,6 +47,9 @@ public final class VisitRunner {
 
   private static final Logger log = LoggerFactory.getLogger(VisitRunner.class);
 
+  /** Pause between the last leave command and quitting. */
+  private static final Duration LEAVE_GRACE = Duration.ofSeconds(1);
+
   private final MinecraftClientDriver driver;
   private final AccountManager accounts;
   private final ProtocolResolver protocols;
@@ -276,6 +279,9 @@ public final class VisitRunner {
 
       if (!visit.onLeaveOrEmpty().isEmpty() && client.isConnected()) {
         runner.run(client, visit.onLeaveOrEmpty());
+        // Behind a proxy a command sent the moment before quitting is lost: the proxy closes the
+        // backend connection before the backend runs it. A player would not quit that fast either.
+        Thread.sleep(settings.jitter().apply(LEAVE_GRACE).toMillis());
       }
 
       client.disconnect("Visit complete");

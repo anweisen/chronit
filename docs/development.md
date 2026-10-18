@@ -44,7 +44,10 @@ makes it possible to assert, without a real server or a network:
 - the resource pack sequence is exactly *accepted, downloaded, successfully loaded*, in order, all
   three naming the same pack
 - decline mode reports exactly one status, and a failed download reports a failure
-- the initial teleport is confirmed and chunk batches acknowledged
+- every teleport is confirmed without a move packet, which a 26.3 server would count twice
+- chunk batches are acknowledged
+- a player that joins dead or dies presses Respawn once, and reports loading again afterwards
+- unsigned player chat is never acknowledged
 - readiness waits for a configured chat pattern and times out cleanly when it never arrives
 - commands arrive without a leading slash, and `sendCommand` refuses before the world is loaded
 - a menu click names the right slot, echoes the state id it was populated with, and claims no

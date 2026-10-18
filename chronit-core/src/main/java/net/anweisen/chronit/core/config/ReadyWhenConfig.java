@@ -10,7 +10,8 @@ import java.time.Duration;
  * limbo or authentication world first. Commands sent before the real world is loaded are silently
  * dropped, so this gate is deliberately conservative.
  *
- * @param spawn     require the join packet plus a confirmed initial teleport (the reliable signal)
+ * @param spawn     require the join packet plus a confirmed initial teleport (the reliable signal),
+ *                  and a live player: one saved dead respawns first
  * @param minChunks additionally require this many chunks to have arrived
  * @param chat      additionally require a chat/system message matching this regular expression,
  *                  for servers that announce readiness ("You are now logged in", "Joining survival")

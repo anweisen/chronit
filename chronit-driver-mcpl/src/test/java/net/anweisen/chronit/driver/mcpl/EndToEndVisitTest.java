@@ -16,12 +16,14 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -105,6 +107,14 @@ class EndToEndVisitTest {
             server.packets(ServerboundChatCommandPacket.class).stream()
                 .map(ServerboundChatCommandPacket::getCommand).toList(),
             "onReady then onLeave commands should arrive in order, secret substituted");
+
+        // Quitting the instant the last command is out loses it behind a proxy.
+        Duration quiet = null;
+        for (int i = 0; i < 50 && (quiet = server.quietBeforeDisconnect()) == null; i++) {
+          Thread.sleep(100);
+        }
+        assertNotNull(quiet, "the server should have seen the client leave");
+        assertTrue(quiet.toMillis() >= 500, "left " + quiet.toMillis() + "ms after the last command");
 
         assertEquals("login ***", Redactor.redact("login s3cret-password"),
             "the password must be masked wherever it is logged");
