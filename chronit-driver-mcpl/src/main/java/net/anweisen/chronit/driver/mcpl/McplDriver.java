@@ -56,6 +56,10 @@ public final class McplDriver implements MinecraftClientDriver {
   public static final int NATIVE_PROTOCOL = MinecraftCodec.CODEC.getProtocolVersion();
   public static final String NATIVE_VERSION = MinecraftCodec.CODEC.getMinecraftVersion();
 
+  static {
+    LenientComponentSerializer.install();
+  }
+
   /** Timing for pack delays, the tick loop and readiness deadlines. Small: these tasks are tiny. */
   private final ScheduledExecutorService scheduler;
 
